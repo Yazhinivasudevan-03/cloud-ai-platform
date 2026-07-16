@@ -51,6 +51,7 @@ config:
   alertEvaluationIntervalMinutes: 5
   optimizationEvaluationIntervalMinutes: 60
   rateLimitLogin: "5/minute"
+  rateLimitRegister: "10/hour"
 
 # --- Secrets (PLACEHOLDER VALUES - see kubernetes/base/secret-backend.yaml's
 # header comment; the same disclosure applies here) ----------------------

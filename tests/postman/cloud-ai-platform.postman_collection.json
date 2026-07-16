@@ -1,0 +1,559 @@
+{
+  "info": {
+    "name": "Cloud AI Platform API",
+    "description": "End-to-end API flow covering auth, the project/microservice/deployment/pod hierarchy, metrics ingestion, alerts, optimization, and notifications. Verified by running with newman against a live backend - see docs/PHASE_10.md.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000/api/v1" },
+    { "key": "postman_username", "value": "" },
+    { "key": "postman_password", "value": "Sup3rSecret1!" },
+    { "key": "access_token", "value": "" },
+    { "key": "project_id", "value": "" },
+    { "key": "microservice_id", "value": "" },
+    { "key": "deployment_id", "value": "" },
+    { "key": "pod_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register (unique username per run)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "pm.collectionVariables.set('postman_username', 'postman_user_' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('Default role is viewer', () => pm.expect(body.roles.some(r => r.name === 'viewer')).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\": \"{{postman_username}}\", \"email\": \"{{postman_username}}@example.com\", \"password\": \"{{postman_password}}\"}"
+            },
+            "url": "{{baseUrl}}/auth/register"
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Returns an access token', () => pm.expect(body.access_token).to.be.a('string'));",
+                  "pm.collectionVariables.set('access_token', body.access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "username", "value": "{{postman_username}}" },
+                { "key": "password", "value": "{{postman_password}}" }
+              ]
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Get current user (/me)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Username matches', () => pm.expect(pm.response.json().username).to.eql(pm.collectionVariables.get('postman_username')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{baseUrl}}/auth/me"
+          }
+        },
+        {
+          "name": "Me without token is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('Status is 401', () => pm.response.to.have.status(401));"]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/auth/me" }
+        },
+        {
+          "name": "Login as seeded admin (for write operations below)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('access_token', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "username", "value": "loadtest_admin" },
+                { "key": "password", "value": "Sup3rSecret1" }
+              ]
+            },
+            "url": "{{baseUrl}}/auth/login",
+            "description": "Reuses tests/load/seed_data.py's admin account (operator/admin role) so the write-operation requests below (create project/microservice/deployment/pod) are actually authorized - a freshly registered user only has the default viewer role."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Projects",
+      "item": [
+        {
+          "name": "Create project",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": { "exec": ["pm.collectionVariables.set('project_name', 'postman-project-' + Date.now());"] }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('project_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"name\": \"{{project_name}}\", \"description\": \"Created by the Postman collection\"}" },
+            "url": "{{baseUrl}}/projects"
+          }
+        },
+        {
+          "name": "List projects (paginated)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has pagination meta', () => pm.expect(body.meta.total).to.be.a('number'));",
+                  "pm.test('Items is an array', () => pm.expect(body.items).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{baseUrl}}/projects?page=1&page_size=10"
+          }
+        },
+        {
+          "name": "Get project by id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Id matches', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('project_id')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{baseUrl}}/projects/{{project_id}}"
+          }
+        },
+        {
+          "name": "Get nonexistent project returns 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status is 404', () => pm.response.to.have.status(404));"] }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{baseUrl}}/projects/999999"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Microservices",
+      "item": [
+        {
+          "name": "Create microservice under project",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('microservice_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"postman-service\", \"language\": \"python\", \"repository_url\": \"https://example.com/repo.git\"}"
+            },
+            "url": "{{baseUrl}}/projects/{{project_id}}/microservices"
+          }
+        },
+        {
+          "name": "List microservices under project",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('At least one item', () => pm.expect(pm.response.json().items.length).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{baseUrl}}/projects/{{project_id}}/microservices"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Deployments",
+      "item": [
+        {
+          "name": "Create deployment under microservice",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('deployment_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"postman-deploy\", \"namespace\": \"postman-ns\", \"replicas\": 2, \"memory_limit_mb\": 512}"
+            },
+            "url": "{{baseUrl}}/microservices/{{microservice_id}}/deployments"
+          }
+        },
+        {
+          "name": "Get deployment by id",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status is 200', () => pm.response.to.have.status(200));"] }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{baseUrl}}/deployments/{{deployment_id}}"
+          }
+        },
+        {
+          "name": "Update deployment status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Status field updated', () => pm.expect(pm.response.json().status).to.eql('running'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"status\": \"running\"}" },
+            "url": "{{baseUrl}}/deployments/{{deployment_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pods",
+      "item": [
+        {
+          "name": "Create pod under deployment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('pod_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"pod_name\": \"postman-pod-1\", \"status\": \"running\"}" },
+            "url": "{{baseUrl}}/deployments/{{deployment_id}}/pods"
+          }
+        },
+        {
+          "name": "List pods under deployment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('At least one item', () => pm.expect(pm.response.json().items.length).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{baseUrl}}/deployments/{{deployment_id}}/pods"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Metrics",
+      "item": [
+        {
+          "name": "Ingest resource usage",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status is 201', () => pm.response.to.have.status(201));"] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"cpu_usage_percent\": 55.5, \"memory_usage_mb\": 512, \"disk_usage_mb\": 1024, \"network_in_kbps\": 100, \"network_out_kbps\": 80, \"recorded_at\": \"2026-07-16T12:00:00\"}"
+            },
+            "url": "{{baseUrl}}/deployments/{{deployment_id}}/resource-usage"
+          }
+        },
+        {
+          "name": "List resource usage",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('At least one item', () => pm.expect(pm.response.json().items.length).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{baseUrl}}/deployments/{{deployment_id}}/resource-usage"
+          }
+        },
+        {
+          "name": "Ingest resource usage rejects negative value",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status is 422', () => pm.response.to.have.status(422));"] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"cpu_usage_percent\": -5, \"memory_usage_mb\": 512, \"disk_usage_mb\": 1024, \"network_in_kbps\": 100, \"network_out_kbps\": 80, \"recorded_at\": \"2026-07-16T12:00:00\"}"
+            },
+            "url": "{{baseUrl}}/deployments/{{deployment_id}}/resource-usage"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alerts",
+      "item": [
+        {
+          "name": "Evaluate alerts (on-demand)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status is 200', () => pm.response.to.have.status(200));"] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{baseUrl}}/alerts/evaluate"
+          }
+        },
+        {
+          "name": "List alerts (global, paginated)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has pagination meta', () => pm.expect(pm.response.json().meta.total).to.be.a('number'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{baseUrl}}/alerts"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Optimization",
+      "item": [
+        {
+          "name": "Evaluate optimizations (on-demand)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status is 200', () => pm.response.to.have.status(200));"] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{baseUrl}}/optimization/evaluate"
+          }
+        },
+        {
+          "name": "List optimization recommendations (global)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has pagination meta', () => pm.expect(pm.response.json().meta.total).to.be.a('number'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{baseUrl}}/optimization-recommendations"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "item": [
+        {
+          "name": "List my notifications",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Items is an array', () => pm.expect(pm.response.json().items).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{baseUrl}}/notifications"
+          }
+        }
+      ]
+    }
+  ]
+}

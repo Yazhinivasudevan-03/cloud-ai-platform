@@ -23,7 +23,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         # inside a field_validator) in its "ctx" field, which json.dumps cannot
         # serialize directly - jsonable_encoder converts them to strings first.
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={
                 "error": {
                     "code": "VALIDATION_ERROR",

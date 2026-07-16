@@ -13,6 +13,7 @@ from app.config.settings import get_settings
 from app.middleware.error_handler import register_exception_handlers
 from app.middleware.logging_middleware import RequestLoggingMiddleware
 from app.middleware.rate_limiter import register_rate_limiter
+from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.monitoring.prometheus_metrics import register_prometheus_metrics
 from app.optimization.scheduler import register_optimization_evaluation_job
 from app.routers import (
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
     register_prometheus_metrics(app)
 
     app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,

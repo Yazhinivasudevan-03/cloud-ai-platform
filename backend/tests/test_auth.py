@@ -40,6 +40,25 @@ def test_register_rejects_weak_password(client):
     assert response.status_code == 422
 
 
+def test_register_is_rate_limited(client):
+    # RATE_LIMIT_REGISTER defaults to "10/hour" - the 11th distinct
+    # registration from the same client within the window must be rejected,
+    # guarding against automated mass account creation the same way login
+    # is guarded against brute-force credential guessing.
+    for i in range(10):
+        response = client.post(
+            "/api/v1/auth/register",
+            json=_register_payload(username=f"user{i}", email=f"user{i}@example.com"),
+        )
+        assert response.status_code == 201
+
+    response = client.post(
+        "/api/v1/auth/register",
+        json=_register_payload(username="user10", email="user10@example.com"),
+    )
+    assert response.status_code == 429
+
+
 def test_login_succeeds_with_valid_credentials(client):
     client.post("/api/v1/auth/register", json=_register_payload())
     response = client.post(

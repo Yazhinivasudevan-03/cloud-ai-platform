@@ -25,7 +25,8 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     summary="Register a new user account",
     responses={409: {"model": ErrorResponse, "description": "Username or email already exists"}},
 )
-def register(payload: UserCreate, db: Session = Depends(get_db)) -> UserRead:
+@limiter.limit(settings.RATE_LIMIT_REGISTER)
+def register(request: Request, payload: UserCreate, db: Session = Depends(get_db)) -> UserRead:
     return AuthController(db).register(payload)
 
 

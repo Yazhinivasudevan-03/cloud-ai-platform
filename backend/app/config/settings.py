@@ -35,6 +35,7 @@ class Settings(BaseSettings):
 
     # Rate limiting
     RATE_LIMIT_LOGIN: str = "5/minute"
+    RATE_LIMIT_REGISTER: str = "10/hour"
 
     # Alerting
     ALERT_EVALUATION_INTERVAL_MINUTES: int = 5

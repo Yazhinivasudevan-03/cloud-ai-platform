@@ -21,6 +21,7 @@ data:
   REFRESH_TOKEN_EXPIRE_DAYS: "7"
   CORS_ORIGINS: {{ .Values.config.corsOrigins | quote }}
   RATE_LIMIT_LOGIN: {{ .Values.config.rateLimitLogin | quote }}
+  RATE_LIMIT_REGISTER: {{ .Values.config.rateLimitRegister | quote }}
   ALERT_EVALUATION_INTERVAL_MINUTES: {{ .Values.config.alertEvaluationIntervalMinutes | quote }}
   OPTIMIZATION_EVALUATION_INTERVAL_MINUTES: {{ .Values.config.optimizationEvaluationIntervalMinutes | quote }}
   SMTP_PORT: "587"

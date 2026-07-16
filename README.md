@@ -6,7 +6,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 
 ## Project status
 
-Being built phase by phase. See [`docs/`](docs/) for a detailed report after each phase.
+**All 10 phases complete.** Built phase by phase - see [`docs/`](docs/) for a detailed, honestly-verified report for each phase.
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -19,7 +19,7 @@ Being built phase by phase. See [`docs/`](docs/) for a detailed report after eac
 | 7 | Frontend (React + TypeScript + MUI dashboards, dark mode, Recharts + Chart.js) | **Complete** - see [`docs/PHASE_7.md`](docs/PHASE_7.md) (visual browser verification not possible in this environment - disclosed there) |
 | 8 | Kubernetes manifests + Helm chart, verified live on a real cluster | **Complete** - see [`docs/PHASE_8.md`](docs/PHASE_8.md) |
 | 9 | CI/CD (GitHub Actions, verified on a real runner + Jenkinsfile) | **Complete** - see [`docs/PHASE_9.md`](docs/PHASE_9.md) |
-| 10 | Load/performance testing, security hardening, final docs | Not started |
+| 10 | Load/performance testing (Locust + JMeter, both run live), security hardening (dependency audits, rate limiting, security headers), Postman collection | **Complete** - see [`docs/PHASE_10.md`](docs/PHASE_10.md) |
 
 ## Repository layout
 
@@ -34,7 +34,7 @@ cloud-ai-platform/
   monitoring/      Prometheus/Grafana config for Docker Compose (Kubernetes uses its own config in kubernetes/base + the Helm chart - see docs/PHASE_8.md)
   scripts/         Operational scripts
   docs/            Phase-by-phase technical documentation
-  tests/           Cross-cutting integration/load tests
+  tests/           Load tests (Locust + JMeter, tests/load/) and API tests (Postman, tests/postman/) - see docs/PHASE_10.md
   .github/         GitHub Actions workflows (backend/frontend/ml-models CI + Docker build/push to GHCR) - see docs/PHASE_9.md
   docker-compose.yml
   Jenkinsfile      Equivalent Jenkins pipeline (spec names both tools) - not run against a live server, see docs/PHASE_9.md
@@ -91,7 +91,17 @@ frontend lint+build, and a Docker image build that also publishes to
 `ghcr.io/yazhinivasudevan-03/cloud-ai-platform-{backend,frontend,ml-models}`
 on `main`. See [`docs/PHASE_9.md`](docs/PHASE_9.md) for verified run results.
 
-Full instructions, commands, and troubleshooting: [`docs/PHASE_1.md`](docs/PHASE_1.md), [`docs/PHASE_2.md`](docs/PHASE_2.md), [`docs/PHASE_3.md`](docs/PHASE_3.md), [`docs/PHASE_4.md`](docs/PHASE_4.md), [`docs/PHASE_5.md`](docs/PHASE_5.md), [`docs/PHASE_6.md`](docs/PHASE_6.md), [`docs/PHASE_7.md`](docs/PHASE_7.md), [`docs/PHASE_8.md`](docs/PHASE_8.md), [`docs/PHASE_9.md`](docs/PHASE_9.md).
+To load-test the running stack (see `docs/PHASE_10.md` for full results):
+
+```powershell
+docker compose run --rm -v "${PWD}/tests/load:/mnt/load" --entrypoint python backend /mnt/load/seed_data.py
+docker run --rm --network cloud-ai-platform_cloud-ai-network -v "${PWD}/tests/load:/mnt/locust" -p 8089:8089 `
+  locustio/locust -f /mnt/locust/locustfile.py --host http://backend:8000
+```
+
+Or run the Postman collection with `newman run tests/postman/cloud-ai-platform.postman_collection.json`.
+
+Full instructions, commands, and troubleshooting: [`docs/PHASE_1.md`](docs/PHASE_1.md), [`docs/PHASE_2.md`](docs/PHASE_2.md), [`docs/PHASE_3.md`](docs/PHASE_3.md), [`docs/PHASE_4.md`](docs/PHASE_4.md), [`docs/PHASE_5.md`](docs/PHASE_5.md), [`docs/PHASE_6.md`](docs/PHASE_6.md), [`docs/PHASE_7.md`](docs/PHASE_7.md), [`docs/PHASE_8.md`](docs/PHASE_8.md), [`docs/PHASE_9.md`](docs/PHASE_9.md), [`docs/PHASE_10.md`](docs/PHASE_10.md).
 
 ## Technology stack
 
@@ -100,3 +110,5 @@ Backend: Python, FastAPI, Pydantic, SQLAlchemy, Alembic, JWT
 AI/ML: TensorFlow, Scikit-learn, Pandas, NumPy (LSTM, Isolation Forest, Random Forest)
 Database: MySQL 8.0
 Infra: Docker, Kubernetes, Helm, Prometheus, Grafana
+CI/CD: GitHub Actions (verified live), Jenkins (pipeline provided)
+Testing: Pytest, Postman (via newman), JMeter, Locust - all run live against the stack, not just written
