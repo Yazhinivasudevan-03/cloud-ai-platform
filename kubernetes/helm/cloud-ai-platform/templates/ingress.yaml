@@ -1,0 +1,28 @@
+# Requires an ingress controller (e.g. ingress-nginx) installed in the
+# cluster - see docs/PHASE_8.md. Everything routes to the frontend Service,
+# since the frontend's own nginx already proxies /api/ internally to the
+# backend Service - no separate /api path rule is needed here.
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cloud-ai-platform-ingress
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+{{- end }}

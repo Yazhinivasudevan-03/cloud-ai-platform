@@ -1,0 +1,55 @@
+# Periodic re-scoring, gated behind mlModels.cronJob.enabled (defaults to
+# false) - assumes the one-off Job (or an equivalent manual training run)
+# has already trained models for this deployment at least once. See
+# kubernetes/base/ml-models-cronjob.yaml's header comment.
+{{- if .Values.mlModels.cronJob.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ml-models-predict
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.mlModels.cronJob.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: ml-models-predict
+              image: "{{ .Values.mlModels.image.repository }}:{{ .Values.mlModels.image.tag }}"
+              imagePullPolicy: {{ .Values.mlModels.image.pullPolicy }}
+              args: ["predict", "--deployment-id", {{ .Values.mlModels.cronJob.deploymentId | quote }}]
+              envFrom:
+                - configMapRef:
+                    name: backend-config
+                - secretRef:
+                    name: backend-secret
+              volumeMounts:
+                - name: ml-artifacts
+                  mountPath: /app/lstm/artifacts
+                  subPath: lstm
+                - name: ml-artifacts
+                  mountPath: /app/isolation_forest/artifacts
+                  subPath: isolation_forest
+                - name: ml-artifacts
+                  mountPath: /app/random_forest/artifacts
+                  subPath: random_forest
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 512Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+          volumes:
+            - name: ml-artifacts
+              persistentVolumeClaim:
+                claimName: ml-models-artifacts-pvc
+{{- end }}

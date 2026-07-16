@@ -1,0 +1,26 @@
+# Requires an ingress controller (e.g. ingress-nginx) installed in the
+# cluster - Docker Desktop Kubernetes doesn't ship one by default; see
+# docs/PHASE_8.md for the install command used to verify this. Everything
+# routes to the frontend Service, since the frontend's own nginx already
+# proxies /api/ internally to the backend Service (see frontend-deployment.yaml) -
+# this Ingress does not need its own /api path rule.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cloud-ai-platform-ingress
+  namespace: cloud-ai-platform
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: cloud-ai-platform.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

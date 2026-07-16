@@ -1,0 +1,16 @@
+# One PVC, three subPaths (see ml-models-job.yaml/-cronjob.yaml) - equivalent
+# to the three named Docker volumes in docker-compose.yml
+# (lstm_artifacts/isolation_forest_artifacts/random_forest_artifacts), just
+# consolidated since Kubernetes Jobs mounting the same PVC is simpler than
+# managing three.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-models-artifacts-pvc
+  namespace: cloud-ai-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi

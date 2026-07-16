@@ -1,0 +1,49 @@
+# One-off run of the full pipeline, gated behind mlModels.job.enabled
+# (defaults to false) mirroring docker-compose.yml's `profiles: ["ml"]`
+# treatment of this same service - see kubernetes/base/ml-models-job.yaml's
+# header comment for the backoffLimit/restartPolicy reasoning.
+{{- if .Values.mlModels.job.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ml-models-run
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ml-models
+          image: "{{ .Values.mlModels.image.repository }}:{{ .Values.mlModels.image.tag }}"
+          imagePullPolicy: {{ .Values.mlModels.image.pullPolicy }}
+          args: ["all", "--deployment-id", {{ .Values.mlModels.job.deploymentId | quote }}, "--pod-id", {{ .Values.mlModels.job.podId | quote }}]
+          envFrom:
+            - configMapRef:
+                name: backend-config
+            - secretRef:
+                name: backend-secret
+          volumeMounts:
+            - name: ml-artifacts
+              mountPath: /app/lstm/artifacts
+              subPath: lstm
+            - name: ml-artifacts
+              mountPath: /app/isolation_forest/artifacts
+              subPath: isolation_forest
+            - name: ml-artifacts
+              mountPath: /app/random_forest/artifacts
+              subPath: random_forest
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: ml-artifacts
+          persistentVolumeClaim:
+            claimName: ml-models-artifacts-pvc
+{{- end }}

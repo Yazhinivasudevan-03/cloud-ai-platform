@@ -1,0 +1,27 @@
+# Requires metrics-server in the cluster - see docs/PHASE_8.md. Without it,
+# this HPA applies successfully but shows <unknown> CPU and never scales.
+{{- if .Values.backend.hpa.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend-hpa
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: {{ .Values.backend.hpa.minReplicas }}
+  maxReplicas: {{ .Values.backend.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # Matches OPTIMIZATION_TARGET_CPU_PERCENT (Phase 6) - see
+          # kubernetes/base/backend-hpa.yaml's header comment.
+          averageUtilization: {{ .Values.backend.hpa.targetCPUUtilizationPercentage }}
+{{- end }}

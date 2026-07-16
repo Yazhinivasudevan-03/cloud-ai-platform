@@ -1,0 +1,52 @@
+# One-off run of the full pipeline (generate-data + train + predict) for a
+# given deployment - the Kubernetes equivalent of
+# `docker compose --profile ml run --rm ml-models all --deployment-id <id> --pod-id <id>`.
+# --deployment-id/--pod-id are placeholders (1/1) - edit before applying, or
+# use `kubectl apply -f - ` with envsubst, or (better) the Helm chart's
+# mlModels.deploymentId/podId values (see kubernetes/helm/).
+#
+# backoffLimit: 0 and restartPolicy: Never are deliberate: an ML run that
+# fails partway (e.g. mid-training) shouldn't be blindly retried by
+# Kubernetes the way a stateless web request would be - a human should look
+# at why it failed first.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ml-models-run
+  namespace: cloud-ai-platform
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ml-models
+          image: cloud-ai-platform-ml-models:latest
+          imagePullPolicy: Never
+          args: ["all", "--deployment-id", "1", "--pod-id", "1"]
+          envFrom:
+            - configMapRef:
+                name: backend-config
+            - secretRef:
+                name: backend-secret
+          volumeMounts:
+            - name: ml-artifacts
+              mountPath: /app/lstm/artifacts
+              subPath: lstm
+            - name: ml-artifacts
+              mountPath: /app/isolation_forest/artifacts
+              subPath: isolation_forest
+            - name: ml-artifacts
+              mountPath: /app/random_forest/artifacts
+              subPath: random_forest
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: ml-artifacts
+          persistentVolumeClaim:
+            claimName: ml-models-artifacts-pvc

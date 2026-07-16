@@ -1,0 +1,27 @@
+# Non-secret backend configuration. Secret values (DB password, JWT signing
+# key, SMTP/Slack/Telegram credentials) live in secret-backend.yaml instead -
+# never mixed into the same object as plaintext config.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+data:
+  APP_NAME: {{ .Values.config.appName | quote }}
+  APP_ENV: {{ .Values.config.appEnv | quote }}
+  DEBUG: {{ .Values.config.debug | quote }}
+  API_V1_PREFIX: "/api/v1"
+  MYSQL_HOST: "mysql"
+  MYSQL_PORT: "3306"
+  MYSQL_DATABASE: {{ .Values.secrets.mysqlDatabase | quote }}
+  ALGORITHM: "HS256"
+  ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+  REFRESH_TOKEN_EXPIRE_DAYS: "7"
+  CORS_ORIGINS: {{ .Values.config.corsOrigins | quote }}
+  RATE_LIMIT_LOGIN: {{ .Values.config.rateLimitLogin | quote }}
+  ALERT_EVALUATION_INTERVAL_MINUTES: {{ .Values.config.alertEvaluationIntervalMinutes | quote }}
+  OPTIMIZATION_EVALUATION_INTERVAL_MINUTES: {{ .Values.config.optimizationEvaluationIntervalMinutes | quote }}
+  SMTP_PORT: "587"
+  SMTP_USE_TLS: "true"

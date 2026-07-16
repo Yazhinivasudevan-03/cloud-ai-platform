@@ -1,0 +1,107 @@
+namespace: cloud-ai-platform
+
+# --- Application images -----------------------------------------------
+# Built locally (docker build) and referenced with pullPolicy: Never by
+# default, since Docker Desktop Kubernetes shares the Docker Engine's image
+# store. Point repository/tag at a real registry and set pullPolicy to
+# IfNotPresent (or Always) for a non-local cluster.
+backend:
+  image:
+    repository: cloud-ai-platform-backend
+    tag: latest
+    pullPolicy: Never
+  replicaCount: 2
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 60
+
+frontend:
+  image:
+    repository: cloud-ai-platform-frontend
+    tag: latest
+    pullPolicy: Never
+  replicaCount: 2
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+
+mysql:
+  image: mysql:8.0
+  storage: 5Gi
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+ingress:
+  enabled: true
+  className: nginx
+  host: cloud-ai-platform.local
+
+# --- Config (non-secret) ------------------------------------------------
+config:
+  appName: "Cloud AI Platform"
+  appEnv: "production"
+  debug: false
+  corsOrigins: "http://localhost:3000"
+  alertEvaluationIntervalMinutes: 5
+  optimizationEvaluationIntervalMinutes: 60
+  rateLimitLogin: "5/minute"
+
+# --- Secrets (PLACEHOLDER VALUES - see kubernetes/base/secret-backend.yaml's
+# header comment; the same disclosure applies here) ----------------------
+secrets:
+  secretKey: "CHANGE-ME-64-char-random-secret-for-jwt-signing-before-real-use"
+  mysqlUser: "cloudai"
+  mysqlPassword: "CHANGE-ME-cloudai-password"
+  mysqlRootPassword: "CHANGE-ME-root-password"
+  mysqlDatabase: "cloud_ai_platform"
+  smtpHost: ""
+  smtpUser: ""
+  smtpPassword: ""
+  smtpFromAddress: ""
+  slackWebhookUrl: ""
+  telegramBotToken: ""
+  telegramChatId: ""
+
+# --- Monitoring stack ----------------------------------------------------
+monitoring:
+  prometheus:
+    enabled: true
+    image: prom/prometheus:v2.54.1
+    storage: 5Gi
+  grafana:
+    enabled: true
+    image: grafana/grafana:11.3.0
+    adminUser: admin
+    adminPassword: admin # CHANGE ME
+    storage: 2Gi
+  nodeExporter:
+    enabled: true
+    image: prom/node-exporter:v1.8.2
+  kubeStateMetrics:
+    enabled: true
+    image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.13.0
+
+# --- ML pipeline (batch, off by default - see values below) --------------
+mlModels:
+  image:
+    repository: cloud-ai-platform-ml-models
+    tag: latest
+    pullPolicy: Never
+  storage: 2Gi
+  # A one-off Job only renders when explicitly enabled, mirroring
+  # docker-compose.yml's `profiles: ["ml"]` treatment of this same service -
+  # it is not part of the always-on install.
+  job:
+    enabled: false
+    deploymentId: 1
+    podId: 1
+  cronJob:
+    enabled: false
+    schedule: "0 3 * * *"
+    deploymentId: 1

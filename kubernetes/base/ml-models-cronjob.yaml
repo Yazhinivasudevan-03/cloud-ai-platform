@@ -1,0 +1,52 @@
+# Periodic re-scoring: assumes ml-models-job.yaml has already trained models
+# for this deployment at least once (train writes to the same PVC this
+# mounts), and just re-runs `predict` on a schedule so predictions/anomaly
+# detections/failure predictions stay fresh as new resource_usage data
+# arrives - the production pattern a one-off Job can't provide by itself.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ml-models-predict
+  namespace: cloud-ai-platform
+spec:
+  schedule: "0 3 * * *" # daily at 03:00
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: ml-models-predict
+              image: cloud-ai-platform-ml-models:latest
+              imagePullPolicy: Never
+              args: ["predict", "--deployment-id", "1"]
+              envFrom:
+                - configMapRef:
+                    name: backend-config
+                - secretRef:
+                    name: backend-secret
+              volumeMounts:
+                - name: ml-artifacts
+                  mountPath: /app/lstm/artifacts
+                  subPath: lstm
+                - name: ml-artifacts
+                  mountPath: /app/isolation_forest/artifacts
+                  subPath: isolation_forest
+                - name: ml-artifacts
+                  mountPath: /app/random_forest/artifacts
+                  subPath: random_forest
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 512Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+          volumes:
+            - name: ml-artifacts
+              persistentVolumeClaim:
+                claimName: ml-models-artifacts-pvc

@@ -1,0 +1,15 @@
+apiVersion: v2
+name: cloud-ai-platform
+description: >-
+  Cloud Usage Monitoring and AI-Driven Predictive Resource Optimization
+  Platform for Microservices - Helm chart templating the same architecture
+  as kubernetes/base/ (raw manifests), parameterized via values.yaml.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - cloud-monitoring
+  - kubernetes
+  - fastapi
+  - react
+  - machine-learning

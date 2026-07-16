@@ -1,0 +1,156 @@
+{{- if .Values.monitoring.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+data:
+  datasource.yml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus_ds
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+        editable: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+data:
+  dashboard.yml: |
+    apiVersion: 1
+    providers:
+      - name: "Platform Dashboards"
+        orgId: 1
+        folder: ""
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        options:
+          path: /var/lib/grafana/dashboards
+---
+# Same dashboard as kubernetes/base/grafana-configmap.yaml - see that file's
+# header comment for what changed vs. the Docker Compose version.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-platform-overview
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+data:
+  platform-overview.json: |
+    {
+      "id": null,
+      "uid": "platform-overview-k8s",
+      "title": "Cloud AI Platform - Overview (Kubernetes)",
+      "description": "API latency/throughput (FastAPI instrumentator), backend container resource usage (kubelet cAdvisor), and host resource usage (Node Exporter).",
+      "tags": ["cloud-ai-platform", "kubernetes"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "15s",
+      "time": { "from": "now-30m", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "title": "API Request Rate (req/s)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+              "expr": "sum(rate(http_requests_total[1m])) by (handler)",
+              "legendFormat": "{{ "{{handler}}" }}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "API p95 Latency (s)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+              "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, handler))",
+              "legendFormat": "{{ "{{handler}}" }}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Backend Pod CPU Usage (%)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"{{ .Values.namespace }}\", pod=~\"backend-.*\", container=\"backend\"}[1m])) by (pod) * 100",
+              "legendFormat": "{{ "{{pod}}" }}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Backend Pod Memory Usage (MB)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+              "expr": "sum(container_memory_usage_bytes{namespace=\"{{ .Values.namespace }}\", pod=~\"backend-.*\", container=\"backend\"}) by (pod) / 1024 / 1024",
+              "legendFormat": "{{ "{{pod}}" }}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Host CPU Usage (%)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+              "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+              "legendFormat": "host CPU",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Host Memory Available (%)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+              "expr": "(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
+              "legendFormat": "available",
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }
+{{- end }}

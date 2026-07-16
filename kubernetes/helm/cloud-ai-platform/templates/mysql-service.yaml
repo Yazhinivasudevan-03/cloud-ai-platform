@@ -1,0 +1,16 @@
+# Named "mysql" to match backend-config's MYSQL_HOST - see
+# kubernetes/base/mysql-service.yaml's header comment.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+  type: ClusterIP

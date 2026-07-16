@@ -1,0 +1,174 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: cloud-ai-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-cloud_ai_platform}
+      MYSQL_USER: ${MYSQL_USER:-cloudai}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-cloudai_password}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/schema/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root_password}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - cloud-ai-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cloud-ai-backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      DEBUG: "false"
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:-cloudai}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-cloudai_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-cloud_ai_platform}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      ALERT_EVALUATION_INTERVAL_MINUTES: ${ALERT_EVALUATION_INTERVAL_MINUTES:-5}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - cloud-ai-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Relative path - nginx (see frontend/nginx.conf) reverse-proxies
+        # /api/ to the backend container, so the browser never needs to
+        # know the backend's real address and CORS never enters into it.
+        VITE_API_BASE_URL: /api/v1
+    container_name: cloud-ai-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - cloud-ai-network
+
+  ml-models:
+    build:
+      context: ./ml-models
+      dockerfile: Dockerfile
+    container_name: cloud-ai-ml-models
+    profiles: ["ml"]
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:-cloudai}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-cloudai_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-cloud_ai_platform}
+    volumes:
+      # Model artifacts must survive between separate `docker compose run`
+      # invocations (train now, predict later) - each `run` is a fresh
+      # ephemeral container, so without a named volume anything written to
+      # the image's writable layer during `train` would vanish before `predict`
+      # ever ran.
+      - lstm_artifacts:/app/lstm/artifacts
+      - isolation_forest_artifacts:/app/isolation_forest/artifacts
+      - random_forest_artifacts:/app/random_forest/artifacts
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - cloud-ai-network
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: cloud-ai-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    networks:
+      - cloud-ai-network
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cloud-ai-cadvisor
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    command:
+      - "--docker_only=true"
+    networks:
+      - cloud-ai-network
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: cloud-ai-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+      - node-exporter
+      - cadvisor
+    networks:
+      - cloud-ai-network
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: cloud-ai-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - cloud-ai-network
+
+networks:
+  cloud-ai-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  prometheus_data:
+  grafana_data:
+  lstm_artifacts:
+  isolation_forest_artifacts:
+  random_forest_artifacts:

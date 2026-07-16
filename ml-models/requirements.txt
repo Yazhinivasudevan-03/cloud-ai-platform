@@ -1,0 +1,11 @@
+tensorflow-cpu==2.17.0
+scikit-learn==1.5.2
+pandas==2.2.3
+matplotlib==3.9.2
+joblib==1.4.2
+sqlalchemy==2.0.36
+pymysql==1.1.1
+python-dotenv==1.0.1
+
+# Testing
+pytest==8.3.4

@@ -1,0 +1,16 @@
+# Named "backend" to match the hostname the frontend's nginx.conf already
+# proxies /api/ to - see kubernetes/base/backend-service.yaml's header comment.
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP

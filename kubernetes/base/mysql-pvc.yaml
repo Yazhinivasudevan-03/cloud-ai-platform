@@ -1,0 +1,16 @@
+# Dynamically provisioned via the cluster's default StorageClass (Docker
+# Desktop Kubernetes ships one named "hostpath"). This is the pattern
+# actually used by mysql-deployment.yaml. See persistent-volume-example.yaml
+# for a hand-provisioned static PersistentVolume, included separately to
+# demonstrate that pattern too without it conflicting with this one.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+  namespace: cloud-ai-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

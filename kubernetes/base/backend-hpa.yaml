@@ -1,0 +1,29 @@
+# Requires metrics-server in the cluster (Docker Desktop Kubernetes doesn't
+# ship one by default - see docs/PHASE_8.md for the install command and its
+# Docker-Desktop-specific --kubelet-insecure-tls caveat). Without it, this
+# HPA applies successfully but `kubectl get hpa` shows <unknown> for CPU
+# utilization and never scales.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend-hpa
+  namespace: cloud-ai-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # Matches OPTIMIZATION_TARGET_CPU_PERCENT (Phase 6) - the same
+          # target utilization this platform's own recommendation engine
+          # uses in its HPA-formula-based scale_deployment calculation, so
+          # the platform's advice about itself would be "no change needed"
+          # when this real HPA is doing its job correctly.
+          averageUtilization: 60

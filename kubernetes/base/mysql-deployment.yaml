@@ -1,0 +1,84 @@
+# A Deployment (not a StatefulSet) with replicas fixed at 1. A StatefulSet
+# is the textbook-correct primitive for a database (stable network identity,
+# ordered/graceful scaling, one PVC per replica via volumeClaimTemplates) -
+# but this platform runs exactly one non-clustered MySQL instance, matching
+# the single `mysql` container in docker-compose.yml, so the extra
+# machinery StatefulSet exists for (multi-replica identity/ordering) has
+# nothing to do here. Scaling this Deployment beyond 1 replica would be
+# wrong (two MySQL processes writing the same PVC) - it is intentionally
+# not exposed via HPA, unlike backend-hpa.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: cloud-ai-platform
+  labels:
+    app: mysql
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # never run two MySQL pods against the same PVC, even momentarily during a rollout
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: MYSQL_DATABASE
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: MYSQL_PASSWORD
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: MYSQL_ROOT_PASSWORD
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+            - name: init-script
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "localhost"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "localhost"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+      volumes:
+        - name: mysql-data
+          persistentVolumeClaim:
+            claimName: mysql-pvc
+        - name: init-script
+          configMap:
+            name: mysql-init-script

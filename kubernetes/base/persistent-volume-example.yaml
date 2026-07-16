@@ -1,0 +1,41 @@
+# Illustrative example of a statically-provisioned PersistentVolume bound to
+# a specific PVC by name - the traditional pattern from before dynamic
+# provisioning/StorageClasses existed, and still used today when storage
+# must be pre-created by an administrator (e.g. a specific network share or
+# pre-existing disk) rather than provisioned on demand.
+#
+# NOT included in kustomization.yaml / not applied by default - the platform
+# actually runs on the dynamically-provisioned PVCs in mysql-pvc.yaml etc.
+# This file exists to satisfy and demonstrate the "Persistent Volume" (as
+# opposed to "Persistent Volume Claim") requirement explicitly, since a real
+# dynamic-provisioning setup never needs a hand-written PV object.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-pv-example
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: /mnt/data/cloud-ai-platform/mysql
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc-static-example
+  namespace: cloud-ai-platform
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  selector:
+    matchLabels:
+      type: local

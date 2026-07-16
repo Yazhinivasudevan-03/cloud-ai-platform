@@ -1,0 +1,36 @@
+Cloud AI Platform ({{ .Chart.Name }} v{{ .Chart.Version }}) has been deployed to namespace "{{ .Values.namespace }}".
+
+Check rollout status:
+  kubectl -n {{ .Values.namespace }} get pods
+
+{{- if .Values.ingress.enabled }}
+
+The application is reachable through the ingress at http://{{ .Values.ingress.host }}/
+(requires an ingress-nginx controller installed in the cluster, and an entry in
+your hosts file pointing {{ .Values.ingress.host }} at the ingress controller's
+address - see docs/PHASE_8.md for exact steps).
+{{- else }}
+
+Ingress is disabled. Port-forward the frontend Service to reach the UI:
+  kubectl -n {{ .Values.namespace }} port-forward svc/frontend 8080:80
+{{- end }}
+
+{{- if .Values.backend.hpa.enabled }}
+
+The backend HorizontalPodAutoscaler requires metrics-server to report real
+CPU utilization:
+  kubectl -n {{ .Values.namespace }} get hpa
+{{- end }}
+
+{{- if .Values.monitoring.grafana.enabled }}
+
+Grafana (admin / {{ .Values.monitoring.grafana.adminPassword }} - CHANGE THIS in production):
+  kubectl -n {{ .Values.namespace }} port-forward svc/grafana 3000:3000
+{{- end }}
+
+{{- if .Values.mlModels.job.enabled }}
+
+The ml-models training Job (ml-models-run) has been created for deployment
+{{ .Values.mlModels.job.deploymentId }} / pod {{ .Values.mlModels.job.podId }}. Check it with:
+  kubectl -n {{ .Values.namespace }} logs job/ml-models-run
+{{- end }}

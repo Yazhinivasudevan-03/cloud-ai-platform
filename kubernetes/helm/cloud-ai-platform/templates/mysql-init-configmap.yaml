@@ -1,0 +1,19 @@
+# Mirrors database/schema/init.sql exactly - kept in sync by hand, same as
+# the raw manifest at kubernetes/base/mysql-init-configmap.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init-script
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+data:
+  init.sql: |
+    CREATE DATABASE IF NOT EXISTS cloud_ai_platform_test
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    CREATE DATABASE IF NOT EXISTS cloud_ai_platform_ml_test
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+    GRANT ALL PRIVILEGES ON cloud_ai_platform_test.* TO {{ printf "'%s'@'%%'" .Values.secrets.mysqlUser }};
+    GRANT ALL PRIVILEGES ON cloud_ai_platform_ml_test.* TO {{ printf "'%s'@'%%'" .Values.secrets.mysqlUser }};
+    FLUSH PRIVILEGES;

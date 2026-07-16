@@ -1,0 +1,16 @@
+# Named "backend" to match the hostname the frontend's nginx.conf already
+# proxies /api/ to under Docker Compose - the exact same frontend image
+# works unmodified in both environments because both provide a resolvable
+# "backend" hostname.
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: cloud-ai-platform
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP

@@ -1,0 +1,38 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: cloud-ai-platform
+
+resources:
+  - namespace.yaml
+  - configmap-backend.yaml
+  - secret-backend.yaml
+  - mysql-init-configmap.yaml
+  - mysql-pvc.yaml
+  - prometheus-pvc.yaml
+  - grafana-pvc.yaml
+  - ml-models-pvc.yaml
+  # persistent-volume-example.yaml is intentionally NOT included here - see
+  # that file's own header comment for why.
+  - mysql-deployment.yaml
+  - mysql-service.yaml
+  - backend-deployment.yaml
+  - backend-service.yaml
+  - backend-hpa.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - ingress.yaml
+  - prometheus-rbac.yaml
+  - prometheus-configmap.yaml
+  - prometheus-deployment.yaml
+  - prometheus-service.yaml
+  - node-exporter-daemonset.yaml
+  - kube-state-metrics.yaml
+  - grafana-configmap.yaml
+  - grafana-deployment.yaml
+  - grafana-service.yaml
+  # ml-models-job.yaml / ml-models-cronjob.yaml are intentionally NOT
+  # included here - they're one-off/scheduled batch workloads applied
+  # explicitly when needed (`kubectl apply -f ml-models-job.yaml`), not part
+  # of the always-on stack, mirroring the `profiles: ["ml"]` treatment this
+  # same service gets in docker-compose.yml.

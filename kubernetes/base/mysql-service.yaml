@@ -1,0 +1,15 @@
+# Named "mysql" to match backend-config's MYSQL_HOST and the hostname
+# docker-compose.yml already uses - the backend's connection code needs no
+# environment-specific branching between Compose and Kubernetes.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: cloud-ai-platform
+spec:
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+  type: ClusterIP

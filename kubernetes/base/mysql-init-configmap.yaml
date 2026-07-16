@@ -1,0 +1,22 @@
+# Mirrors database/schema/init.sql exactly (mounted into
+# /docker-entrypoint-initdb.d in mysql-deployment.yaml) so the test/ml-test
+# databases and grants exist in the cluster the same way they do under
+# Docker Compose. Keep this in sync with database/schema/init.sql by hand -
+# Kustomize's configMapGenerator (see kustomization.yaml) could generate it
+# automatically instead, but an explicit checked-in copy is easier to read
+# for a dissertation artifact.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init-script
+  namespace: cloud-ai-platform
+data:
+  init.sql: |
+    CREATE DATABASE IF NOT EXISTS cloud_ai_platform_test
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    CREATE DATABASE IF NOT EXISTS cloud_ai_platform_ml_test
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+    GRANT ALL PRIVILEGES ON cloud_ai_platform_test.* TO 'cloudai'@'%';
+    GRANT ALL PRIVILEGES ON cloud_ai_platform_ml_test.* TO 'cloudai'@'%';
+    FLUSH PRIVILEGES;
