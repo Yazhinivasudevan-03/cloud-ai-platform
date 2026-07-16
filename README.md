@@ -18,7 +18,7 @@ Being built phase by phase. See [`docs/`](docs/) for a detailed report after eac
 | 6 | Resource optimization (8 recommendation types incl. HPA-style scaling) + cost prediction engine | **Complete** - see [`docs/PHASE_6.md`](docs/PHASE_6.md) |
 | 7 | Frontend (React + TypeScript + MUI dashboards, dark mode, Recharts + Chart.js) | **Complete** - see [`docs/PHASE_7.md`](docs/PHASE_7.md) (visual browser verification not possible in this environment - disclosed there) |
 | 8 | Kubernetes manifests + Helm chart, verified live on a real cluster | **Complete** - see [`docs/PHASE_8.md`](docs/PHASE_8.md) |
-| 9 | CI/CD (GitHub Actions) | Not started |
+| 9 | CI/CD (GitHub Actions, verified on a real runner + Jenkinsfile) | **Complete** - see [`docs/PHASE_9.md`](docs/PHASE_9.md) |
 | 10 | Load/performance testing, security hardening, final docs | Not started |
 
 ## Repository layout
@@ -35,9 +35,12 @@ cloud-ai-platform/
   scripts/         Operational scripts
   docs/            Phase-by-phase technical documentation
   tests/           Cross-cutting integration/load tests
-  .github/         CI/CD workflows (not yet implemented)
+  .github/         GitHub Actions workflows (backend/frontend/ml-models CI + Docker build/push to GHCR) - see docs/PHASE_9.md
   docker-compose.yml
+  Jenkinsfile      Equivalent Jenkins pipeline (spec names both tools) - not run against a live server, see docs/PHASE_9.md
 ```
+
+Live repository: [github.com/Yazhinivasudevan-03/cloud-ai-platform](https://github.com/Yazhinivasudevan-03/cloud-ai-platform)
 
 ## Quick start
 
@@ -82,7 +85,13 @@ kubectl apply -k kubernetes/base
 helm install cloud-ai-platform kubernetes/helm/cloud-ai-platform --create-namespace -n cloud-ai-platform
 ```
 
-Full instructions, commands, and troubleshooting: [`docs/PHASE_1.md`](docs/PHASE_1.md), [`docs/PHASE_2.md`](docs/PHASE_2.md), [`docs/PHASE_3.md`](docs/PHASE_3.md), [`docs/PHASE_4.md`](docs/PHASE_4.md), [`docs/PHASE_5.md`](docs/PHASE_5.md), [`docs/PHASE_6.md`](docs/PHASE_6.md), [`docs/PHASE_7.md`](docs/PHASE_7.md), [`docs/PHASE_8.md`](docs/PHASE_8.md).
+Every push to `main` (or PR) runs the CI workflows in `.github/workflows/` -
+backend/ml-models pytest suites against real MySQL service containers,
+frontend lint+build, and a Docker image build that also publishes to
+`ghcr.io/yazhinivasudevan-03/cloud-ai-platform-{backend,frontend,ml-models}`
+on `main`. See [`docs/PHASE_9.md`](docs/PHASE_9.md) for verified run results.
+
+Full instructions, commands, and troubleshooting: [`docs/PHASE_1.md`](docs/PHASE_1.md), [`docs/PHASE_2.md`](docs/PHASE_2.md), [`docs/PHASE_3.md`](docs/PHASE_3.md), [`docs/PHASE_4.md`](docs/PHASE_4.md), [`docs/PHASE_5.md`](docs/PHASE_5.md), [`docs/PHASE_6.md`](docs/PHASE_6.md), [`docs/PHASE_7.md`](docs/PHASE_7.md), [`docs/PHASE_8.md`](docs/PHASE_8.md), [`docs/PHASE_9.md`](docs/PHASE_9.md).
 
 ## Technology stack
 
