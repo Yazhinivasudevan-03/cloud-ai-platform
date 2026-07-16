@@ -1,0 +1,42 @@
+name: Frontend CI
+
+# Lints and builds the React/TypeScript SPA - no backend/database needed
+# since this only exercises the build toolchain (tsc + Vite), not runtime
+# behaviour. The full auth-flow-through-nginx verification (Phase 7 §8) is
+# a manual/local check, not something this workflow re-runs on every push.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint (eslint)
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Type-check + build (tsc -b && vite build)
+        working-directory: frontend
+        run: npm run build

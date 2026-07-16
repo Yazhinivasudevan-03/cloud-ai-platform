@@ -1,0 +1,77 @@
+name: Backend CI
+
+# Runs the backend's real pytest suite (120 tests as of Phase 7) against a
+# genuine MySQL 8.0 service container - the same "real database, not SQLite"
+# principle backend/tests/conftest.py documents for local runs. Restricted to
+# changes that could plausibly affect the backend so an unrelated frontend/
+# ml-models/docs change doesn't spin up a MySQL container for nothing.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          # Matches app/config/settings.py's own defaults (MYSQL_USER=cloudai
+          # etc.) so no extra env wiring is needed beyond MYSQL_HOST/PORT.
+          # MYSQL_DATABASE is set to the *test* schema name directly - the
+          # mysql image's entrypoint grants MYSQL_USER privileges on exactly
+          # this database, which is all backend/tests/conftest.py needs (it
+          # builds the schema itself via Base.metadata.create_all).
+          MYSQL_ROOT_PASSWORD: root_password
+          MYSQL_DATABASE: cloud_ai_platform_test
+          MYSQL_USER: cloudai
+          MYSQL_PASSWORD: cloudai_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: 3306
+      MYSQL_USER: cloudai
+      MYSQL_PASSWORD: cloudai_password
+      MYSQL_DATABASE: cloud_ai_platform_test
+      SECRET_KEY: ci-test-secret-key-not-for-production-use
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Wait for MySQL
+        run: |
+          for i in $(seq 1 30); do
+            mysqladmin ping -h127.0.0.1 -P3306 -ucloudai -pcloudai_password --silent && break
+            echo "Waiting for MySQL... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run backend test suite
+        working-directory: backend
+        run: pytest -v

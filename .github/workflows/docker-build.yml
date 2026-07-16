@@ -1,0 +1,71 @@
+name: Docker Build
+
+# Builds all three Docker images (backend, frontend, ml-models) on every
+# push/PR that could affect them, catching a broken Dockerfile the same way
+# frontend-ci.yml/backend-ci.yml catch a broken build/test. On pushes to
+# main (never on PRs from forks, which don't get write access to secrets),
+# also pushes to GitHub Container Registry using the automatically-provided
+# GITHUB_TOKEN - no external registry account or secret needs to be
+# configured for this to work, unlike Docker Hub/ECR/GCR.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "ml-models/**"
+      - ".github/workflows/docker-build.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "ml-models/**"
+      - ".github/workflows/docker-build.yml"
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        include:
+          - component: backend
+            context: ./backend
+            image: cloud-ai-platform-backend
+          - component: frontend
+            context: ./frontend
+            image: cloud-ai-platform-frontend
+          - component: ml-models
+            context: ./ml-models
+            image: cloud-ai-platform-ml-models
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (and push on main only)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
