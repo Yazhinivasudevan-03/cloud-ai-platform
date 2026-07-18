@@ -240,3 +240,39 @@ export interface CostForecast {
   historical_periods_used: number;
   trend_slope_per_month: number | null;
 }
+
+// --- Cloud provider accounts (self-service, unlimited count) -----------
+
+// A common, recognized subset for icon/label purposes in the UI - the
+// backend itself accepts any provider string at all, so "other" (or any
+// value not in this list) must still be handled gracefully client-side.
+export type KnownCloudProvider = "aws" | "azure" | "gcp";
+
+export interface CloudProviderAccount {
+  id: number;
+  user_id: number;
+  provider: string;
+  account_name: string;
+  region: string;
+  account_identifier: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CloudProviderAccountCreate {
+  provider: string;
+  account_name: string;
+  region: string;
+  account_identifier?: string;
+  credentials: Record<string, string>;
+}
+
+export interface CloudProviderAccountUpdate {
+  provider?: string;
+  account_name?: string;
+  region?: string;
+  account_identifier?: string;
+  credentials?: Record<string, string>;
+  is_active?: boolean;
+}

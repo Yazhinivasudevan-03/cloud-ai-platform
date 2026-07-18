@@ -57,6 +57,7 @@ config:
 # header comment; the same disclosure applies here) ----------------------
 secrets:
   secretKey: "CHANGE-ME-64-char-random-secret-for-jwt-signing-before-real-use"
+  cloudCredentialsEncryptionKey: "CHANGE-ME-a-different-random-secret-than-secretKey"
   mysqlUser: "cloudai"
   mysqlPassword: "CHANGE-ME-cloudai-password"
   mysqlRootPassword: "CHANGE-ME-root-password"

@@ -9,6 +9,7 @@ from app.models.anomaly_detection import AnomalyDetection
 from app.models.api_key import ApiKey
 from app.models.audit_log import AuditLog
 from app.models.cloud_cost import CloudCost
+from app.models.cloud_provider_account import CloudProviderAccount
 from app.models.deployment import Deployment
 from app.models.failure_prediction import FailurePrediction
 from app.models.log import Log
@@ -29,6 +30,7 @@ __all__ = [
     "ApiKey",
     "AuditLog",
     "CloudCost",
+    "CloudProviderAccount",
     "Deployment",
     "FailurePrediction",
     "Log",

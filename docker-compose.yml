@@ -36,6 +36,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-cloudai_password}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-cloud_ai_platform}
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      CLOUD_CREDENTIALS_ENCRYPTION_KEY: ${CLOUD_CREDENTIALS_ENCRYPTION_KEY:-change-me-cloud-credentials-key-in-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       ALERT_EVALUATION_INTERVAL_MINUTES: ${ALERT_EVALUATION_INTERVAL_MINUTES:-5}
       SMTP_HOST: ${SMTP_HOST:-}

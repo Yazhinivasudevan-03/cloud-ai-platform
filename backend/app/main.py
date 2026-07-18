@@ -20,6 +20,7 @@ from app.routers import (
     alert_router,
     auth_router,
     cloud_cost_router,
+    cloud_provider_account_router,
     deployment_router,
     health_router,
     metric_router,
@@ -90,6 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(notification_router.router, prefix=settings.API_V1_PREFIX)
     app.include_router(optimization_router.router, prefix=settings.API_V1_PREFIX)
     app.include_router(cloud_cost_router.router, prefix=settings.API_V1_PREFIX)
+    app.include_router(cloud_provider_account_router.router, prefix=settings.API_V1_PREFIX)
 
     return app
 

@@ -23,6 +23,7 @@ import FolderIcon from "@mui/icons-material/FolderOutlined";
 import NotificationsActiveIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import TuneIcon from "@mui/icons-material/TuneOutlined";
 import MailIcon from "@mui/icons-material/MailOutlined";
+import CloudSyncIcon from "@mui/icons-material/CloudSyncOutlined";
 import PeopleIcon from "@mui/icons-material/PeopleOutlined";
 import Brightness4Icon from "@mui/icons-material/Brightness4";
 import Brightness7Icon from "@mui/icons-material/Brightness7";
@@ -39,6 +40,7 @@ const NAV_ITEMS = [
   { label: "Alerts", to: "/alerts", icon: <NotificationsActiveIcon /> },
   { label: "Optimization", to: "/optimization", icon: <TuneIcon /> },
   { label: "Notifications", to: "/notifications", icon: <MailIcon /> },
+  { label: "Cloud Accounts", to: "/cloud-accounts", icon: <CloudSyncIcon /> },
 ];
 
 export function AppLayout() {

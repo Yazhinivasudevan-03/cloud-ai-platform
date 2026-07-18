@@ -55,6 +55,9 @@ class User(TimestampMixin, Base):
     notifications: Mapped[list["Notification"]] = relationship(
         "Notification", back_populates="user", cascade="all, delete-orphan"
     )
+    cloud_provider_accounts: Mapped[list["CloudProviderAccount"]] = relationship(
+        "CloudProviderAccount", back_populates="user", cascade="all, delete-orphan"
+    )
     audit_logs: Mapped[list["AuditLog"]] = relationship("AuditLog", back_populates="user")
     settings: Mapped[list["Setting"]] = relationship(
         "Setting", back_populates="user", cascade="all, delete-orphan"

@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # Cloud provider account credential encryption (see app/utils/crypto.py) -
+    # deliberately a separate secret from SECRET_KEY: the JWT signing key and
+    # the at-rest encryption key for stored cloud credentials serve different
+    # cryptographic purposes and should never be the same value, so that
+    # rotating one never silently weakens or breaks the other.
+    CLOUD_CREDENTIALS_ENCRYPTION_KEY: str = "change-me-cloud-credentials-key-in-production"
+
     # CORS
     CORS_ORIGINS: str = "http://localhost:3000"
 

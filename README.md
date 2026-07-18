@@ -20,6 +20,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 | 8 | Kubernetes manifests + Helm chart, verified live on a real cluster | **Complete** - see [`docs/PHASE_8.md`](docs/PHASE_8.md) |
 | 9 | CI/CD (GitHub Actions, verified on a real runner + Jenkinsfile) | **Complete** - see [`docs/PHASE_9.md`](docs/PHASE_9.md) |
 | 10 | Load/performance testing (Locust + JMeter, both run live), security hardening (dependency audits, rate limiting, security headers), Postman collection | **Complete** - see [`docs/PHASE_10.md`](docs/PHASE_10.md) |
+| 11 | Self-service cloud provider accounts (any provider, unlimited count, per-account region) | **Complete** - see [`docs/PHASE_11.md`](docs/PHASE_11.md) |
 
 ## Repository layout
 
@@ -101,7 +102,11 @@ docker run --rm --network cloud-ai-platform_cloud-ai-network -v "${PWD}/tests/lo
 
 Or run the Postman collection with `newman run tests/postman/cloud-ai-platform.postman_collection.json`.
 
-Full instructions, commands, and troubleshooting: [`docs/PHASE_1.md`](docs/PHASE_1.md), [`docs/PHASE_2.md`](docs/PHASE_2.md), [`docs/PHASE_3.md`](docs/PHASE_3.md), [`docs/PHASE_4.md`](docs/PHASE_4.md), [`docs/PHASE_5.md`](docs/PHASE_5.md), [`docs/PHASE_6.md`](docs/PHASE_6.md), [`docs/PHASE_7.md`](docs/PHASE_7.md), [`docs/PHASE_8.md`](docs/PHASE_8.md), [`docs/PHASE_9.md`](docs/PHASE_9.md), [`docs/PHASE_10.md`](docs/PHASE_10.md).
+Every user can configure their own cloud provider accounts (any provider,
+unlimited count, one region per account) under **Cloud Accounts** in the
+sidebar, or via `POST /api/v1/cloud-provider-accounts` - see [`docs/PHASE_11.md`](docs/PHASE_11.md).
+
+Full instructions, commands, and troubleshooting: [`docs/PHASE_1.md`](docs/PHASE_1.md), [`docs/PHASE_2.md`](docs/PHASE_2.md), [`docs/PHASE_3.md`](docs/PHASE_3.md), [`docs/PHASE_4.md`](docs/PHASE_4.md), [`docs/PHASE_5.md`](docs/PHASE_5.md), [`docs/PHASE_6.md`](docs/PHASE_6.md), [`docs/PHASE_7.md`](docs/PHASE_7.md), [`docs/PHASE_8.md`](docs/PHASE_8.md), [`docs/PHASE_9.md`](docs/PHASE_9.md), [`docs/PHASE_10.md`](docs/PHASE_10.md), [`docs/PHASE_11.md`](docs/PHASE_11.md).
 
 ## Technology stack
 
