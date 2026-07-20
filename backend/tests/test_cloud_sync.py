@@ -5,6 +5,7 @@ path: deployment -> linked cloud account -> real boto3 CloudWatch call
 from datetime import datetime, timezone
 
 import boto3
+import pytest
 from moto import mock_aws
 
 from app.models.cloud_provider_account import CloudProviderAccount
@@ -184,6 +185,79 @@ def test_sync_all_tolerates_individual_failures(client, make_user_with_role, db_
     assert summary.deployments_attempted == 2
     assert summary.deployments_synced == 1
     assert summary.deployments_failed == 1
+
+
+@mock_aws
+@pytest.mark.parametrize(
+    "cpu_usage_percent,expected_alert_type,expected_severity",
+    [
+        (60.0, "cpu_elevated", "warning"),
+        (80.0, "cpu_high", "critical"),
+        (100.0, "cpu_saturated", "critical"),
+    ],
+)
+def test_cloud_synced_cpu_usage_triggers_correct_alert_and_notification(
+    client, make_user_with_role, db_session, cpu_usage_percent, expected_alert_type, expected_severity
+):
+    """Proves the full real chain end to end for genuinely cloud-sourced
+    data (not manually-POSTed usage): a real boto3 CloudWatch call (via
+    moto) -> CloudSyncService writes a resource_usage row -> the existing,
+    source-agnostic AlertEvaluationService reads that same row and fires
+    the correct alert tier and a dashboard notification - at each of the
+    three configured CPU thresholds (60/80/100)."""
+    from app.services.alert_evaluation_service import AlertEvaluationService
+
+    admin_token = make_user_with_role(f"cloud_alert_admin_{int(cpu_usage_percent)}", "admin")
+    me = client.get("/api/v1/auth/me", headers=_auth_header(admin_token)).json()
+    account = _make_cloud_account(db_session, me["id"])
+    deployment = _make_deployment(client, admin_token, f"alert-{int(cpu_usage_percent)}")
+
+    resource_id = f"i-alert-test-{int(cpu_usage_percent)}"
+    client.put(
+        f"/api/v1/deployments/{deployment['id']}",
+        json={"cloud_provider_account_id": account.id, "cloud_resource_identifier": resource_id},
+        headers=_auth_header(admin_token),
+    )
+
+    client_boto = boto3.client(
+        "cloudwatch", region_name="us-east-1", aws_access_key_id="testing", aws_secret_access_key="testing"
+    )
+    now = datetime.now(timezone.utc)
+    client_boto.put_metric_data(
+        Namespace="AWS/EC2",
+        MetricData=[
+            {
+                "MetricName": "CPUUtilization",
+                "Dimensions": [{"Name": "InstanceId", "Value": resource_id}],
+                "Timestamp": now,
+                "Value": cpu_usage_percent,
+                "Unit": "Percent",
+            },
+        ],
+    )
+
+    sync_resp = client.post(
+        f"/api/v1/deployments/{deployment['id']}/sync-cloud-metrics", headers=_auth_header(admin_token)
+    )
+    assert sync_resp.status_code == 200
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    from app.models.alert import Alert
+
+    alert = (
+        db_session.query(Alert)
+        .filter(Alert.deployment_id == deployment["id"], Alert.status == "active")
+        .one()
+    )
+    assert alert.alert_type == expected_alert_type
+    assert alert.severity == expected_severity
+
+    notifications_resp = client.get(
+        "/api/v1/notifications", headers=_auth_header(admin_token)
+    )
+    assert notifications_resp.status_code == 200
+    assert notifications_resp.json()["meta"]["total"] >= 1
 
 
 def test_cannot_link_deployment_to_another_users_cloud_account(

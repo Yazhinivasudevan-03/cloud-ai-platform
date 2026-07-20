@@ -109,6 +109,41 @@ def test_cpu_saturated_uses_highest_tier(db_session, demo_deployment, admin_user
     assert alert.threshold_percent == 100.0
 
 
+@pytest.mark.parametrize(
+    "cpu_usage_percent,expected_type,expected_severity",
+    [
+        (59.9, None, None),  # just below the warning tier - no alert at all
+        (60.0, "cpu_elevated", "warning"),  # exact warning boundary (inclusive)
+        (79.9, "cpu_elevated", "warning"),  # just below the critical tier
+        (80.0, "cpu_high", "critical"),  # exact critical boundary (inclusive)
+        (99.9, "cpu_high", "critical"),  # just below the saturated tier
+        (100.0, "cpu_saturated", "critical"),  # exact saturated boundary (inclusive)
+    ],
+)
+def test_cpu_threshold_boundaries_are_inclusive(
+    db_session, demo_deployment, admin_user, cpu_usage_percent, expected_type, expected_severity
+):
+    """ALERT_CPU_WARNING/CRITICAL/SATURATED_THRESHOLD default to 60/80/100 -
+    verifies the >= comparisons in _cpu_condition() land on the correct tier
+    at the exact boundary value, not just comfortably inside each band."""
+    _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=cpu_usage_percent)
+
+    summary = AlertEvaluationService(db_session).evaluate_all()
+
+    if expected_type is None:
+        assert summary["alerts_created"] == 0
+        return
+
+    assert summary["alerts_created"] == 1
+    alert = db_session.query(Alert).filter(Alert.deployment_id == demo_deployment.id).one()
+    assert alert.alert_type == expected_type
+    assert alert.severity == expected_severity
+
+    notifications = db_session.query(Notification).filter(Notification.alert_id == alert.id).all()
+    assert len(notifications) == 1
+    assert notifications[0].user_id == admin_user.id
+
+
 def test_severity_escalation_resolves_old_alert_and_creates_new_one(
     db_session, demo_deployment, admin_user
 ):
