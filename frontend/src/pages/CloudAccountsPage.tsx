@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Box,
   Button,
   Chip,
   Dialog,
@@ -8,7 +10,9 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
+  Link,
   MenuItem,
+  Paper,
   Stack,
   TextField,
   Typography,
@@ -16,13 +20,14 @@ import {
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/DeleteOutline";
 import EditIcon from "@mui/icons-material/EditOutlined";
+import MonitorHeartOutlinedIcon from "@mui/icons-material/MonitorHeartOutlined";
 import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
 import { PageHeader } from "@/components/PageHeader";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { cloudProviderAccountsApi } from "@/services/cloudProviderAccountsApi";
-import { formatDateTime } from "@/utils/formatters";
+import { formatDateTime, formatMegabytes, formatPercent } from "@/utils/formatters";
 import type { CloudProviderAccount } from "@/types";
 
 // A recognized subset for a nicer label - the backend accepts any provider
@@ -48,6 +53,7 @@ export function CloudAccountsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<CloudProviderAccount | null>(null);
   const [accountToDelete, setAccountToDelete] = useState<CloudProviderAccount | null>(null);
+  const [usageAccount, setUsageAccount] = useState<CloudProviderAccount | null>(null);
 
   const accountsQuery = useQuery({
     queryKey: ["cloud-provider-accounts", page, pageSize],
@@ -91,6 +97,9 @@ export function CloudAccountsPage() {
       align: "right",
       render: (a) => (
         <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+          <IconButton size="small" aria-label="View usage" onClick={() => setUsageAccount(a)}>
+            <MonitorHeartOutlinedIcon fontSize="small" />
+          </IconButton>
           <IconButton
             size="small"
             aria-label="Edit cloud account"
@@ -161,7 +170,89 @@ export function CloudAccountsPage() {
         onCancel={() => setAccountToDelete(null)}
         onConfirm={() => accountToDelete && deleteMutation.mutate(accountToDelete.id)}
       />
+
+      <AccountUsageDialog account={usageAccount} onClose={() => setUsageAccount(null)} />
     </>
+  );
+}
+
+function AccountUsageDialog({
+  account,
+  onClose,
+}: {
+  account: CloudProviderAccount | null;
+  onClose: () => void;
+}) {
+  const usageQuery = useQuery({
+    queryKey: ["cloud-provider-accounts", account?.id, "deployments"],
+    queryFn: () => cloudProviderAccountsApi.listLinkedDeployments(account!.id),
+    enabled: account !== null,
+  });
+
+  return (
+    <Dialog open={account !== null} onClose={onClose} fullWidth maxWidth="md">
+      <DialogTitle>
+        Live usage - {account?.account_name}
+        <Typography variant="body2" color="text.secondary">
+          Every deployment linked to this account, with its most recently synced metrics.
+        </Typography>
+      </DialogTitle>
+      <DialogContent>
+        <ErrorAlert error={usageQuery.error} />
+        {usageQuery.isLoading && <Typography variant="body2">Loading...</Typography>}
+        {usageQuery.data && usageQuery.data.length === 0 && (
+          <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+            No deployments are linked to this account yet. Link one from a deployment's "Cloud Sync"
+            tab.
+          </Typography>
+        )}
+        {usageQuery.data && usageQuery.data.length > 0 && (
+          <Stack spacing={1.5} sx={{ mt: 1 }}>
+            {usageQuery.data.map((d) => (
+              <Paper key={d.deployment_id} variant="outlined" sx={{ p: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap">
+                  <Box>
+                    <Link
+                      component={RouterLink}
+                      to={`/deployments/${d.deployment_id}`}
+                      variant="body1"
+                      fontWeight={600}
+                      underline="hover"
+                    >
+                      {d.deployment_name}
+                    </Link>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      {d.namespace} - {d.cloud_resource_identifier}
+                    </Typography>
+                  </Box>
+                  {d.latest_usage ? (
+                    <Stack direction="row" spacing={1}>
+                      <Chip size="small" label={`CPU ${formatPercent(d.latest_usage.cpu_usage_percent, 1)}`} />
+                      <Chip size="small" label={`Mem ${formatMegabytes(d.latest_usage.memory_usage_mb)}`} />
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={`Net ${d.latest_usage.network_in_kbps.toFixed(1)}/${d.latest_usage.network_out_kbps.toFixed(1)} kbps`}
+                      />
+                    </Stack>
+                  ) : (
+                    <Chip size="small" variant="outlined" label="Never synced yet" />
+                  )}
+                </Stack>
+                {d.latest_usage && (
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
+                    Last synced {formatDateTime(d.latest_usage.recorded_at)}
+                  </Typography>
+                )}
+              </Paper>
+            ))}
+          </Stack>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Close</Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 

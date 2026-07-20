@@ -271,6 +271,14 @@ export interface CloudProviderAccount {
   updated_at: string;
 }
 
+export interface CloudAccountDeploymentSummary {
+  deployment_id: number;
+  deployment_name: string;
+  namespace: string;
+  cloud_resource_identifier: string;
+  latest_usage: ResourceUsage | null;
+}
+
 export interface CloudProviderAccountCreate {
   provider: string;
   account_name: string;

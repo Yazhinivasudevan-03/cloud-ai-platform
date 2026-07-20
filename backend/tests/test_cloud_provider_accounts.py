@@ -253,3 +253,149 @@ def test_cannot_delete_another_users_account(client, make_user_with_role):
     )
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "NOT_YOUR_CLOUD_ACCOUNT"
+
+
+# --- Linked-deployments "at a glance" usage view ---------------------------
+
+
+def _make_deployment(client, token, suffix: str) -> dict:
+    project = client.post(
+        "/api/v1/projects", json={"name": f"cpa-project-{suffix}"}, headers=_auth_header(token)
+    ).json()
+    microservice = client.post(
+        f"/api/v1/projects/{project['id']}/microservices",
+        json={"name": f"cpa-service-{suffix}"},
+        headers=_auth_header(token),
+    ).json()
+    return client.post(
+        f"/api/v1/microservices/{microservice['id']}/deployments",
+        json={"name": f"cpa-deploy-{suffix}", "namespace": "default"},
+        headers=_auth_header(token),
+    ).json()
+
+
+def test_linked_deployments_empty_when_none_linked(client, make_user_with_role):
+    token = make_user_with_role("cloud_user_u", "operator")
+    account = client.post(
+        "/api/v1/cloud-provider-accounts", json=_payload(), headers=_auth_header(token)
+    ).json()
+
+    response = client.get(
+        f"/api/v1/cloud-provider-accounts/{account['id']}/deployments", headers=_auth_header(token)
+    )
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_linked_deployments_shows_deployment_with_no_usage_yet(client, make_user_with_role):
+    token = make_user_with_role("cloud_user_v", "operator")
+    account = client.post(
+        "/api/v1/cloud-provider-accounts", json=_payload(), headers=_auth_header(token)
+    ).json()
+    deployment = _make_deployment(client, token, "v")
+    client.put(
+        f"/api/v1/deployments/{deployment['id']}",
+        json={"cloud_provider_account_id": account["id"], "cloud_resource_identifier": "i-no-usage-yet"},
+        headers=_auth_header(token),
+    )
+
+    response = client.get(
+        f"/api/v1/cloud-provider-accounts/{account['id']}/deployments", headers=_auth_header(token)
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["deployment_id"] == deployment["id"]
+    assert body[0]["cloud_resource_identifier"] == "i-no-usage-yet"
+    assert body[0]["latest_usage"] is None
+
+
+def test_linked_deployments_shows_latest_synced_usage(client, make_user_with_role):
+    token = make_user_with_role("cloud_user_w", "operator")
+    account = client.post(
+        "/api/v1/cloud-provider-accounts", json=_payload(), headers=_auth_header(token)
+    ).json()
+    deployment = _make_deployment(client, token, "w")
+    client.put(
+        f"/api/v1/deployments/{deployment['id']}",
+        json={"cloud_provider_account_id": account["id"], "cloud_resource_identifier": "i-with-usage"},
+        headers=_auth_header(token),
+    )
+    client.post(
+        f"/api/v1/deployments/{deployment['id']}/resource-usage",
+        json={
+            "cpu_usage_percent": 42.0,
+            "memory_usage_mb": 512.0,
+            "disk_usage_mb": 100.0,
+            "network_in_kbps": 10.0,
+            "network_out_kbps": 5.0,
+            "recorded_at": "2026-01-01T00:00:00Z",
+        },
+        headers=_auth_header(token),
+    )
+
+    response = client.get(
+        f"/api/v1/cloud-provider-accounts/{account['id']}/deployments", headers=_auth_header(token)
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["latest_usage"]["cpu_usage_percent"] == 42.0
+    assert body[0]["latest_usage"]["memory_usage_mb"] == 512.0
+
+
+def test_linked_deployments_only_shows_deployments_for_that_account(client, make_user_with_role):
+    token = make_user_with_role("cloud_user_x", "operator")
+    account_a = client.post(
+        "/api/v1/cloud-provider-accounts",
+        json=_payload(account_name="account-a"),
+        headers=_auth_header(token),
+    ).json()
+    account_b = client.post(
+        "/api/v1/cloud-provider-accounts",
+        json=_payload(account_name="account-b"),
+        headers=_auth_header(token),
+    ).json()
+    deployment_a = _make_deployment(client, token, "x-a")
+    deployment_b = _make_deployment(client, token, "x-b")
+    client.put(
+        f"/api/v1/deployments/{deployment_a['id']}",
+        json={"cloud_provider_account_id": account_a["id"], "cloud_resource_identifier": "i-a"},
+        headers=_auth_header(token),
+    )
+    client.put(
+        f"/api/v1/deployments/{deployment_b['id']}",
+        json={"cloud_provider_account_id": account_b["id"], "cloud_resource_identifier": "i-b"},
+        headers=_auth_header(token),
+    )
+
+    response = client.get(
+        f"/api/v1/cloud-provider-accounts/{account_a['id']}/deployments", headers=_auth_header(token)
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["deployment_id"] == deployment_a["id"]
+
+
+def test_cannot_list_linked_deployments_for_another_users_account(client, make_user_with_role):
+    token_a = make_user_with_role("cloud_user_y", "operator")
+    token_b = make_user_with_role("cloud_user_z", "operator")
+    account = client.post(
+        "/api/v1/cloud-provider-accounts", json=_payload(), headers=_auth_header(token_a)
+    ).json()
+
+    response = client.get(
+        f"/api/v1/cloud-provider-accounts/{account['id']}/deployments", headers=_auth_header(token_b)
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "NOT_YOUR_CLOUD_ACCOUNT"
+
+
+def test_linked_deployments_nonexistent_account_returns_404(client, make_user_with_role):
+    token = make_user_with_role("cloud_user_aa", "operator")
+    response = client.get(
+        "/api/v1/cloud-provider-accounts/999999/deployments", headers=_auth_header(token)
+    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "CLOUD_ACCOUNT_NOT_FOUND"

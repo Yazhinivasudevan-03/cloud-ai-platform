@@ -1,5 +1,6 @@
 import { httpClient } from "./httpClient";
 import type {
+  CloudAccountDeploymentSummary,
   CloudProviderAccount,
   CloudProviderAccountCreate,
   CloudProviderAccountUpdate,
@@ -37,4 +38,9 @@ export const cloudProviderAccountsApi = {
 
   remove: (accountId: number) =>
     httpClient.delete(`/cloud-provider-accounts/${accountId}`).then(() => undefined),
+
+  listLinkedDeployments: (accountId: number) =>
+    httpClient
+      .get<CloudAccountDeploymentSummary[]>(`/cloud-provider-accounts/${accountId}/deployments`)
+      .then((r) => r.data),
 };

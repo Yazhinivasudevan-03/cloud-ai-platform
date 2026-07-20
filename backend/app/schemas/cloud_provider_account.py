@@ -17,6 +17,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.resource_usage import ResourceUsageRead
+
 
 class CloudProviderAccountBase(BaseModel):
     provider: str = Field(
@@ -54,3 +56,21 @@ class CloudProviderAccountRead(CloudProviderAccountBase):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class CloudAccountDeploymentSummary(BaseModel):
+    """One deployment linked to a cloud provider account, paired with its
+    most recent synced resource usage snapshot (see
+    CloudProviderAccountService.list_linked_deployments) - powers the "at a
+    glance" usage view on the Cloud Accounts page, so a user can see live
+    CPU/memory/network for every deployment tied to an account without
+    opening each deployment individually."""
+
+    deployment_id: int
+    deployment_name: str
+    namespace: str
+    cloud_resource_identifier: str
+    latest_usage: ResourceUsageRead | None = Field(
+        default=None,
+        description="Most recent resource usage snapshot for this deployment, or null if it has never been synced/recorded yet",
+    )

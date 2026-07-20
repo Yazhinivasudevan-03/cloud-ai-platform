@@ -36,6 +36,15 @@ class DeploymentRepository(BaseRepository[Deployment]):
         )
         return list(self.db.scalars(stmt).all())
 
+    def list_by_cloud_account(self, cloud_provider_account_id: int) -> list[Deployment]:
+        """Every deployment linked to one specific cloud provider account -
+        used by the consolidated "at a glance" usage view on the Cloud
+        Accounts page (see CloudProviderAccountService.list_linked_deployments)."""
+        stmt = select(Deployment).where(
+            Deployment.cloud_provider_account_id == cloud_provider_account_id
+        )
+        return list(self.db.scalars(stmt).all())
+
     def search(
         self,
         microservice_id: int,

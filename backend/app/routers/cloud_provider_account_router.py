@@ -12,6 +12,7 @@ from app.controllers.cloud_provider_account_controller import CloudProviderAccou
 from app.database.session import get_db
 from app.models.user import User
 from app.schemas.cloud_provider_account import (
+    CloudAccountDeploymentSummary,
     CloudProviderAccountCreate,
     CloudProviderAccountRead,
     CloudProviderAccountUpdate,
@@ -104,3 +105,24 @@ def delete_my_cloud_provider_account(
     current_user: User = Depends(get_current_active_user),
 ) -> None:
     CloudProviderAccountController(db).delete(account_id, current_user.id)
+
+
+@router.get(
+    "/{account_id}/deployments",
+    response_model=list[CloudAccountDeploymentSummary],
+    summary=(
+        "List the deployments linked to one of the current user's own cloud provider accounts, "
+        "each with its latest synced resource usage (CPU/memory/network) - the consolidated "
+        "'at a glance' usage view"
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+    },
+)
+def list_cloud_provider_account_deployments(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> list[CloudAccountDeploymentSummary]:
+    return CloudProviderAccountController(db).list_linked_deployments(account_id, current_user.id)

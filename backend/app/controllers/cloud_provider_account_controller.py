@@ -4,11 +4,13 @@ import math
 from sqlalchemy.orm import Session
 
 from app.schemas.cloud_provider_account import (
+    CloudAccountDeploymentSummary,
     CloudProviderAccountCreate,
     CloudProviderAccountRead,
     CloudProviderAccountUpdate,
 )
 from app.schemas.common import PaginatedResponse, PaginationMeta
+from app.schemas.resource_usage import ResourceUsageRead
 from app.services.cloud_provider_account_service import CloudProviderAccountService
 
 
@@ -45,3 +47,18 @@ class CloudProviderAccountController:
 
     def delete(self, account_id: int, current_user_id: int) -> None:
         self.service.delete(account_id, current_user_id)
+
+    def list_linked_deployments(
+        self, account_id: int, current_user_id: int
+    ) -> list[CloudAccountDeploymentSummary]:
+        pairs = self.service.list_linked_deployments(account_id, current_user_id)
+        return [
+            CloudAccountDeploymentSummary(
+                deployment_id=deployment.id,
+                deployment_name=deployment.name,
+                namespace=deployment.namespace,
+                cloud_resource_identifier=deployment.cloud_resource_identifier,
+                latest_usage=ResourceUsageRead.model_validate(usage) if usage else None,
+            )
+            for deployment, usage in pairs
+        ]

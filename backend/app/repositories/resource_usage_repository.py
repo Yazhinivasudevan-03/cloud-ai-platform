@@ -12,6 +12,15 @@ class ResourceUsageRepository(BaseRepository[ResourceUsage]):
     def __init__(self, db: Session):
         super().__init__(db, ResourceUsage)
 
+    def get_latest_for_deployment(self, deployment_id: int) -> ResourceUsage | None:
+        stmt = (
+            select(ResourceUsage)
+            .where(ResourceUsage.deployment_id == deployment_id)
+            .order_by(ResourceUsage.recorded_at.desc())
+            .limit(1)
+        )
+        return self.db.scalars(stmt).first()
+
     def search(
         self,
         deployment_id: int,
