@@ -1,15 +1,28 @@
-"""User and Role models with a many-to-many association for RBAC."""
+"""User and Role models with a many-to-many association for RBAC.
+
+Login credentials live in their own database (AUTH_SCHEMA, same MySQL
+server as the rest of the application - see docs/PHASE_13.md), isolated
+from all other application data. Every other model that references a user
+(ApiKey, CloudProviderAccount, AuditLog, Notification, Setting, Project)
+imports AUTH_SCHEMA from here to fully-qualify its ForeignKey target,
+since MySQL requires cross-database foreign keys to name the schema
+explicitly.
+"""
 from sqlalchemy import Boolean, Column, ForeignKey, Index, Integer, String, Table, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.config.settings import get_settings
 from app.database.base import Base
 from app.models.mixins import TimestampMixin
+
+AUTH_SCHEMA = get_settings().AUTH_MYSQL_DATABASE
 
 user_roles = Table(
     "user_roles",
     Base.metadata,
-    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
-    Column("role_id", Integer, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
+    Column("user_id", Integer, ForeignKey(f"{AUTH_SCHEMA}.users.id", ondelete="CASCADE"), primary_key=True),
+    Column("role_id", Integer, ForeignKey(f"{AUTH_SCHEMA}.roles.id", ondelete="CASCADE"), primary_key=True),
+    schema=AUTH_SCHEMA,
 )
 
 
@@ -17,6 +30,7 @@ class Role(TimestampMixin, Base):
     """A named permission group (e.g. admin, operator, viewer)."""
 
     __tablename__ = "roles"
+    __table_args__ = {"schema": AUTH_SCHEMA}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
@@ -35,6 +49,7 @@ class User(TimestampMixin, Base):
         UniqueConstraint("username", name="uq_users_username"),
         UniqueConstraint("email", name="uq_users_email"),
         Index("ix_users_email_active", "email", "is_active"),
+        {"schema": AUTH_SCHEMA},
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

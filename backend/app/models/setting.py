@@ -4,6 +4,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
 from app.models.mixins import TimestampMixin
+from app.models.user import AUTH_SCHEMA
 
 
 class Setting(TimestampMixin, Base):
@@ -14,7 +15,7 @@ class Setting(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+        Integer, ForeignKey(f"{AUTH_SCHEMA}.users.id", ondelete="CASCADE"), nullable=True, index=True
     )
     key: Mapped[str] = mapped_column(String(100), nullable=False)
     value: Mapped[str | None] = mapped_column(Text, nullable=True)

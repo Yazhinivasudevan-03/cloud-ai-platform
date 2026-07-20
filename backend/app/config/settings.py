@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     MYSQL_DATABASE: str = "cloud_ai_platform"
     MYSQL_ROOT_PASSWORD: str = "root_password"
 
+    # A separate database (same MySQL server) holding only login credentials
+    # (users/roles/user_roles) - isolated from the rest of the application
+    # data so a compromise or backup/restore of the main application
+    # database never exposes or touches password hashes. See docs/PHASE_13.md.
+    AUTH_MYSQL_DATABASE: str = "cloud_ai_auth"
+
     # JWT
     SECRET_KEY: str = "change-me-in-production"
     ALGORITHM: str = "HS256"

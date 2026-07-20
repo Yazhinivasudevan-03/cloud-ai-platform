@@ -35,6 +35,7 @@ services:
       MYSQL_USER: ${MYSQL_USER:-cloudai}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-cloudai_password}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-cloud_ai_platform}
+      AUTH_MYSQL_DATABASE: ${AUTH_MYSQL_DATABASE:-cloud_ai_auth}
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
       CLOUD_CREDENTIALS_ENCRYPTION_KEY: ${CLOUD_CREDENTIALS_ENCRYPTION_KEY:-change-me-cloud-credentials-key-in-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}

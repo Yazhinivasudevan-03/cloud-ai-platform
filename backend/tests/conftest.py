@@ -6,10 +6,12 @@ afterwards, giving full isolation without recreating tables per test.
 """
 import os
 
-# Force the test database name even if MYSQL_DATABASE is already set in the
-# environment (e.g. when running inside the backend container), so tests
-# never touch the development schema.
+# Force the test database names even if already set in the environment (e.g.
+# when running inside the backend container), so tests never touch the
+# development schemas - both the main application database and the separate
+# login-credentials database (see docs/PHASE_13.md) get their own test schema.
 os.environ["MYSQL_DATABASE"] = "cloud_ai_platform_test"
+os.environ["AUTH_MYSQL_DATABASE"] = "cloud_ai_auth_test"
 
 import pytest
 from fastapi.testclient import TestClient

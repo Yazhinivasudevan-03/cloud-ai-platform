@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
 from app.models.mixins import TimestampMixin
+from app.models.user import AUTH_SCHEMA
 
 
 class Notification(TimestampMixin, Base):
@@ -16,7 +17,7 @@ class Notification(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        Integer, ForeignKey(f"{AUTH_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     alert_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("alerts.id", ondelete="CASCADE"), nullable=True, index=True

@@ -26,6 +26,17 @@ config.set_main_option("sqlalchemy.url", settings.sqlalchemy_database_uri)
 target_metadata = Base.metadata
 
 
+def include_name(name, type_, parent_names):
+    """Restrict include_schemas=True to exactly our two application
+    databases - without this, MySQL's autogenerate tries to reflect every
+    schema the server has (mysql, sys, performance_schema, the *_test
+    databases, ...), including ones the app's MySQL user has no read access
+    to at all, which fails outright rather than just producing noise."""
+    if type_ == "schema":
+        return name in (None, settings.MYSQL_DATABASE, settings.AUTH_MYSQL_DATABASE)
+    return True
+
+
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
@@ -34,6 +45,12 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        # Users/roles/user_roles live in a separate database on the same
+        # MySQL server (AUTH_MYSQL_DATABASE - see docs/PHASE_13.md); without
+        # this, autogenerate only reflects the connection's default schema
+        # and would think those tables (and every cross-schema FK) don't exist.
+        include_schemas=True,
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -48,7 +65,11 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata, compare_type=True
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            include_schemas=True,
+            include_name=include_name,
         )
         with context.begin_transaction():
             context.run_migrations()

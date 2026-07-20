@@ -49,6 +49,7 @@ jobs:
       MYSQL_USER: cloudai
       MYSQL_PASSWORD: cloudai_password
       MYSQL_DATABASE: cloud_ai_platform_test
+      AUTH_MYSQL_DATABASE: cloud_ai_auth_test
       SECRET_KEY: ci-test-secret-key-not-for-production-use
 
     steps:
@@ -71,6 +72,18 @@ jobs:
             echo "Waiting for MySQL... ($i/30)"
             sleep 2
           done
+
+      - name: Create login-credentials test database
+        # The MySQL service container's MYSQL_DATABASE env var only
+        # auto-creates + grants cloud_ai_platform_test - unlike Docker
+        # Compose (database/schema/init.sql), this service has no init
+        # script mount, so the second database (users/roles/user_roles -
+        # see docs/PHASE_13.md) needs creating by hand.
+        run: |
+          mysql -h127.0.0.1 -P3306 -uroot -proot_password -e "
+            CREATE DATABASE IF NOT EXISTS cloud_ai_auth_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            GRANT ALL PRIVILEGES ON cloud_ai_auth_test.* TO 'cloudai'@'%';
+            FLUSH PRIVILEGES;"
 
       - name: Run backend test suite
         working-directory: backend

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
 from app.models.mixins import TimestampMixin
+from app.models.user import AUTH_SCHEMA
 
 
 class CloudProviderAccount(TimestampMixin, Base):
@@ -19,7 +20,7 @@ class CloudProviderAccount(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        Integer, ForeignKey(f"{AUTH_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # Free-text rather than a fixed enum, deliberately: the requirement is
     # "any cloud provider", not a hardcoded AWS/Azure/GCP list - a provider

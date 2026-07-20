@@ -64,6 +64,7 @@ secrets:
   mysqlPassword: "CHANGE-ME-cloudai-password"
   mysqlRootPassword: "CHANGE-ME-root-password"
   mysqlDatabase: "cloud_ai_platform"
+  authMysqlDatabase: "cloud_ai_auth"
   smtpHost: ""
   smtpUser: ""
   smtpPassword: ""

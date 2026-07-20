@@ -13,7 +13,13 @@ data:
         CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     CREATE DATABASE IF NOT EXISTS cloud_ai_platform_ml_test
         CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    CREATE DATABASE IF NOT EXISTS cloud_ai_auth
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    CREATE DATABASE IF NOT EXISTS cloud_ai_auth_test
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
     GRANT ALL PRIVILEGES ON cloud_ai_platform_test.* TO {{ printf "'%s'@'%%'" .Values.secrets.mysqlUser }};
     GRANT ALL PRIVILEGES ON cloud_ai_platform_ml_test.* TO {{ printf "'%s'@'%%'" .Values.secrets.mysqlUser }};
+    GRANT ALL PRIVILEGES ON cloud_ai_auth.* TO {{ printf "'%s'@'%%'" .Values.secrets.mysqlUser }};
+    GRANT ALL PRIVILEGES ON cloud_ai_auth_test.* TO {{ printf "'%s'@'%%'" .Values.secrets.mysqlUser }};
     FLUSH PRIVILEGES;
