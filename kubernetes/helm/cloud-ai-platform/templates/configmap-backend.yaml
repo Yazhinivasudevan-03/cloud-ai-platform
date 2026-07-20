@@ -22,6 +22,8 @@ data:
   CORS_ORIGINS: {{ .Values.config.corsOrigins | quote }}
   RATE_LIMIT_LOGIN: {{ .Values.config.rateLimitLogin | quote }}
   RATE_LIMIT_REGISTER: {{ .Values.config.rateLimitRegister | quote }}
+  CLOUD_SYNC_INTERVAL_MINUTES: {{ .Values.config.cloudSyncIntervalMinutes | quote }}
+  CLOUD_SYNC_LOOKBACK_MINUTES: {{ .Values.config.cloudSyncLookbackMinutes | quote }}
   ALERT_EVALUATION_INTERVAL_MINUTES: {{ .Values.config.alertEvaluationIntervalMinutes | quote }}
   OPTIMIZATION_EVALUATION_INTERVAL_MINUTES: {{ .Values.config.optimizationEvaluationIntervalMinutes | quote }}
   SMTP_PORT: "587"

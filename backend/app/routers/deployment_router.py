@@ -8,6 +8,7 @@ from app.authentication.dependencies import get_current_active_user, require_rol
 from app.controllers.deployment_controller import DeploymentController
 from app.database.session import get_db
 from app.models.user import User
+from app.schemas.cloud_sync import CloudSyncResult
 from app.schemas.common import ErrorResponse, PaginatedResponse
 from app.schemas.deployment import DeploymentCreate, DeploymentRead, DeploymentUpdate
 
@@ -21,14 +22,18 @@ router = APIRouter(tags=["Deployments"])
     summary="Create a deployment under a microservice (operator/admin)",
     dependencies=[Depends(require_roles("operator", "admin"))],
     responses={
+        403: {"model": ErrorResponse, "description": "cloud_provider_account_id belongs to another user"},
         404: {"model": ErrorResponse, "description": "Microservice not found"},
         409: {"model": ErrorResponse, "description": "Deployment already exists in namespace"},
     },
 )
 def create_deployment(
-    microservice_id: int, payload: DeploymentCreate, db: Session = Depends(get_db)
+    microservice_id: int,
+    payload: DeploymentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> DeploymentRead:
-    return DeploymentController(db).create(microservice_id, payload)
+    return DeploymentController(db).create(microservice_id, payload, current_user.id)
 
 
 @router.get(
@@ -73,14 +78,18 @@ def get_deployment(
     summary="Update a deployment (operator/admin)",
     dependencies=[Depends(require_roles("operator", "admin"))],
     responses={
+        403: {"model": ErrorResponse, "description": "cloud_provider_account_id belongs to another user"},
         404: {"model": ErrorResponse, "description": "Deployment not found"},
         409: {"model": ErrorResponse, "description": "Deployment already exists in namespace"},
     },
 )
 def update_deployment(
-    deployment_id: int, payload: DeploymentUpdate, db: Session = Depends(get_db)
+    deployment_id: int,
+    payload: DeploymentUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> DeploymentRead:
-    return DeploymentController(db).update(deployment_id, payload)
+    return DeploymentController(db).update(deployment_id, payload, current_user.id)
 
 
 @router.delete(
@@ -92,3 +101,25 @@ def update_deployment(
 )
 def delete_deployment(deployment_id: int, db: Session = Depends(get_db)) -> None:
     DeploymentController(db).delete(deployment_id)
+
+
+@router.post(
+    "/deployments/{deployment_id}/sync-cloud-metrics",
+    response_model=CloudSyncResult,
+    summary="Pull real, live resource-usage metrics from this deployment's linked cloud "
+    "provider account right now (operator/admin)",
+    dependencies=[Depends(require_roles("operator", "admin"))],
+    responses={
+        404: {"model": ErrorResponse, "description": "Deployment or cloud account not found"},
+        422: {
+            "model": ErrorResponse,
+            "description": "No cloud account/resource linked, or that provider isn't supported yet",
+        },
+    },
+)
+def sync_deployment_cloud_metrics(
+    deployment_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_active_user),
+) -> CloudSyncResult:
+    return DeploymentController(db).sync_cloud_metrics(deployment_id)

@@ -3,17 +3,22 @@ import math
 
 from sqlalchemy.orm import Session
 
+from app.schemas.cloud_sync import CloudSyncResult
 from app.schemas.common import PaginatedResponse, PaginationMeta
 from app.schemas.deployment import DeploymentCreate, DeploymentRead, DeploymentUpdate
+from app.services.cloud_sync_service import CloudSyncService
 from app.services.deployment_service import DeploymentService
 
 
 class DeploymentController:
     def __init__(self, db: Session):
         self.service = DeploymentService(db)
+        self.cloud_sync_service = CloudSyncService(db)
 
-    def create(self, microservice_id: int, payload: DeploymentCreate) -> DeploymentRead:
-        deployment = self.service.create(microservice_id, payload)
+    def create(
+        self, microservice_id: int, payload: DeploymentCreate, current_user_id: int
+    ) -> DeploymentRead:
+        deployment = self.service.create(microservice_id, payload, current_user_id)
         return DeploymentRead.model_validate(deployment)
 
     def get(self, deployment_id: int) -> DeploymentRead:
@@ -40,8 +45,15 @@ class DeploymentController:
             ),
         )
 
-    def update(self, deployment_id: int, payload: DeploymentUpdate) -> DeploymentRead:
-        return DeploymentRead.model_validate(self.service.update(deployment_id, payload))
+    def update(
+        self, deployment_id: int, payload: DeploymentUpdate, current_user_id: int
+    ) -> DeploymentRead:
+        return DeploymentRead.model_validate(
+            self.service.update(deployment_id, payload, current_user_id)
+        )
 
     def delete(self, deployment_id: int) -> None:
         self.service.delete(deployment_id)
+
+    def sync_cloud_metrics(self, deployment_id: int) -> CloudSyncResult:
+        return self.cloud_sync_service.sync_deployment(deployment_id)

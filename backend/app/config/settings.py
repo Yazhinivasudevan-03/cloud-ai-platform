@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     OPTIMIZATION_MAX_SCALE_REPLICAS: int = 10
     OPTIMIZATION_COST_RIGHTSIZING_SAVINGS_FRACTION: float = 0.15
 
+    # Real-time cloud metrics sync (Phase 12) - periodically pulls real
+    # telemetry from each linked deployment's cloud provider account
+    CLOUD_SYNC_INTERVAL_MINUTES: int = 15
+    CLOUD_SYNC_LOOKBACK_MINUTES: int = 15
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]

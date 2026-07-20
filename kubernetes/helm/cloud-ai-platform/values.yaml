@@ -52,6 +52,8 @@ config:
   optimizationEvaluationIntervalMinutes: 60
   rateLimitLogin: "5/minute"
   rateLimitRegister: "10/hour"
+  cloudSyncIntervalMinutes: 15
+  cloudSyncLookbackMinutes: 15
 
 # --- Secrets (PLACEHOLDER VALUES - see kubernetes/base/secret-backend.yaml's
 # header comment; the same disclosure applies here) ----------------------

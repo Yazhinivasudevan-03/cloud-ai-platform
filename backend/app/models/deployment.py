@@ -33,9 +33,28 @@ class Deployment(TimestampMixin, Base):
         "without one configured, since memory_usage_mb alone can't be turned "
         "into a utilization percentage without a limit to divide by.",
     )
+    cloud_provider_account_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("cloud_provider_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="If set, this deployment's resource usage can be synced from "
+        "real cloud provider telemetry using this account's credentials "
+        "(Phase 12) - see app/services/cloud_sync_service.py.",
+    )
+    cloud_resource_identifier: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="The provider-specific resource this deployment maps to, e.g. "
+        "an AWS EC2 instance ID - required alongside cloud_provider_account_id "
+        "for cloud metric syncing to be possible.",
+    )
 
     microservice: Mapped["Microservice"] = relationship(
         "Microservice", back_populates="deployments"
+    )
+    cloud_provider_account: Mapped["CloudProviderAccount | None"] = relationship(
+        "CloudProviderAccount"
     )
     pods: Mapped[list["Pod"]] = relationship(
         "Pod", back_populates="deployment", cascade="all, delete-orphan"

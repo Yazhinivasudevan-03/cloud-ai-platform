@@ -22,6 +22,15 @@ class DeploymentBase(BaseModel):
     memory_limit_mb: float | None = Field(
         default=None, ge=0, description="Configured memory limit per pod, in MB"
     )
+    cloud_provider_account_id: int | None = Field(
+        default=None,
+        description="Cloud provider account to use for syncing real cloud metrics",
+    )
+    cloud_resource_identifier: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Provider-specific resource ID this deployment maps to, e.g. an EC2 instance ID",
+    )
 
 
 class DeploymentCreate(DeploymentBase):
@@ -36,6 +45,8 @@ class DeploymentUpdate(BaseModel):
     replicas: int | None = Field(default=None, ge=0)
     status: DeploymentStatus | None = None
     memory_limit_mb: float | None = Field(default=None, ge=0)
+    cloud_provider_account_id: int | None = None
+    cloud_resource_identifier: str | None = Field(default=None, max_length=200)
 
 
 class DeploymentRead(DeploymentBase):

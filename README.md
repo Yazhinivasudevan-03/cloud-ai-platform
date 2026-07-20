@@ -21,6 +21,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 | 9 | CI/CD (GitHub Actions, verified on a real runner + Jenkinsfile) | **Complete** - see [`docs/PHASE_9.md`](docs/PHASE_9.md) |
 | 10 | Load/performance testing (Locust + JMeter, both run live), security hardening (dependency audits, rate limiting, security headers), Postman collection | **Complete** - see [`docs/PHASE_10.md`](docs/PHASE_10.md) |
 | 11 | Self-service cloud provider accounts (any provider, unlimited count, per-account region) | **Complete** - see [`docs/PHASE_11.md`](docs/PHASE_11.md) |
+| 12 | Real-time cloud metrics sync (real AWS CloudWatch via boto3, scheduled + on-demand) | **Complete** - see [`docs/PHASE_12.md`](docs/PHASE_12.md) |
 
 ## Repository layout
 
@@ -106,7 +107,12 @@ Every user can configure their own cloud provider accounts (any provider,
 unlimited count, one region per account) under **Cloud Accounts** in the
 sidebar, or via `POST /api/v1/cloud-provider-accounts` - see [`docs/PHASE_11.md`](docs/PHASE_11.md).
 
-Full instructions, commands, and troubleshooting: [`docs/PHASE_1.md`](docs/PHASE_1.md), [`docs/PHASE_2.md`](docs/PHASE_2.md), [`docs/PHASE_3.md`](docs/PHASE_3.md), [`docs/PHASE_4.md`](docs/PHASE_4.md), [`docs/PHASE_5.md`](docs/PHASE_5.md), [`docs/PHASE_6.md`](docs/PHASE_6.md), [`docs/PHASE_7.md`](docs/PHASE_7.md), [`docs/PHASE_8.md`](docs/PHASE_8.md), [`docs/PHASE_9.md`](docs/PHASE_9.md), [`docs/PHASE_10.md`](docs/PHASE_10.md), [`docs/PHASE_11.md`](docs/PHASE_11.md).
+Link a deployment to one of your cloud accounts (Deployment detail page,
+**Cloud Sync** tab) to pull real, live resource-usage metrics from that
+account on a schedule or on demand - currently AWS CloudWatch (EC2 basic
+monitoring) only - see [`docs/PHASE_12.md`](docs/PHASE_12.md).
+
+Full instructions, commands, and troubleshooting: [`docs/PHASE_1.md`](docs/PHASE_1.md), [`docs/PHASE_2.md`](docs/PHASE_2.md), [`docs/PHASE_3.md`](docs/PHASE_3.md), [`docs/PHASE_4.md`](docs/PHASE_4.md), [`docs/PHASE_5.md`](docs/PHASE_5.md), [`docs/PHASE_6.md`](docs/PHASE_6.md), [`docs/PHASE_7.md`](docs/PHASE_7.md), [`docs/PHASE_8.md`](docs/PHASE_8.md), [`docs/PHASE_9.md`](docs/PHASE_9.md), [`docs/PHASE_10.md`](docs/PHASE_10.md), [`docs/PHASE_11.md`](docs/PHASE_11.md), [`docs/PHASE_12.md`](docs/PHASE_12.md).
 
 ## Technology stack
 

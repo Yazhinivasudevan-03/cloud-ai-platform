@@ -86,8 +86,19 @@ export interface Deployment {
   replicas: number;
   status: DeploymentStatus;
   memory_limit_mb: number | null;
+  cloud_provider_account_id: number | null;
+  cloud_resource_identifier: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface CloudSyncResult {
+  deployment_id: number;
+  cloud_provider_account_id: number;
+  provider: string;
+  resource_identifier: string;
+  synced_at: string;
+  resource_usage_id: number;
 }
 
 export type PodStatus = "running" | "pending" | "failed" | "succeeded" | "unknown";

@@ -26,6 +26,16 @@ class DeploymentRepository(BaseRepository[Deployment]):
         )
         return self.db.scalars(stmt).first()
 
+    def list_cloud_linked(self) -> list[Deployment]:
+        """Every deployment with a cloud provider account + resource
+        identifier configured - i.e. eligible for real-time cloud metric
+        syncing (see CloudSyncService)."""
+        stmt = select(Deployment).where(
+            Deployment.cloud_provider_account_id.is_not(None),
+            Deployment.cloud_resource_identifier.is_not(None),
+        )
+        return list(self.db.scalars(stmt).all())
+
     def search(
         self,
         microservice_id: int,

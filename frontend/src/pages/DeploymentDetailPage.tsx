@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -9,6 +10,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  MenuItem,
   Paper,
   Stack,
   Tab,
@@ -16,6 +18,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import CloudSyncIcon from "@mui/icons-material/CloudSyncOutlined";
 import Grid from "@mui/material/Grid2";
 import AddIcon from "@mui/icons-material/Add";
 import {
@@ -38,16 +41,19 @@ import { predictionsApi } from "@/services/predictionsApi";
 import { alertsApi } from "@/services/alertsApi";
 import { optimizationApi } from "@/services/optimizationApi";
 import { podsApi } from "@/services/podsApi";
+import { cloudProviderAccountsApi } from "@/services/cloudProviderAccountsApi";
 import { formatDateTime, formatPercent } from "@/utils/formatters";
 import type {
   Alert as AlertModel,
   AnomalyDetection,
+  CloudSyncResult,
+  Deployment,
   FailurePrediction,
   OptimizationRecommendation,
   Pod,
 } from "@/types";
 
-const TABS = ["Overview", "Anomalies", "Failure Risk", "Pods", "Alerts", "Optimization"];
+const TABS = ["Overview", "Anomalies", "Failure Risk", "Pods", "Alerts", "Optimization", "Cloud Sync"];
 
 export function DeploymentDetailPage() {
   const { deploymentId } = useParams();
@@ -78,6 +84,7 @@ export function DeploymentDetailPage() {
       {tab === 3 && <PodsTab deploymentId={id} />}
       {tab === 4 && <AlertsTab deploymentId={id} />}
       {tab === 5 && <OptimizationTab deploymentId={id} />}
+      {tab === 6 && <CloudSyncTab deploymentId={id} deployment={deploymentQuery.data ?? null} />}
     </>
   );
 }
@@ -503,5 +510,190 @@ function OptimizationTab({ deploymentId }: { deploymentId: number }) {
       isLoading={query.isLoading}
       emptyMessage="No optimization recommendations for this deployment."
     />
+  );
+}
+
+// --- Cloud Sync (Phase 12: real-time cloud provider metrics) ---------------
+
+function CloudSyncTab({ deploymentId, deployment }: { deploymentId: number; deployment: Deployment | null }) {
+  const { hasRole } = useAuth();
+  const queryClient = useQueryClient();
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [syncResult, setSyncResult] = useState<CloudSyncResult | null>(null);
+
+  const accountsQuery = useQuery({
+    queryKey: ["cloud-provider-accounts", "for-link"],
+    queryFn: () => cloudProviderAccountsApi.list({ pageSize: 100 }),
+  });
+
+  const linkedAccount = accountsQuery.data?.items.find((a) => a.id === deployment?.cloud_provider_account_id);
+
+  const syncMutation = useMutation({
+    mutationFn: () => deploymentsApi.syncCloudMetrics(deploymentId),
+    onSuccess: (result) => {
+      setSyncResult(result);
+      void queryClient.invalidateQueries({ queryKey: ["resource-usage", deploymentId] });
+    },
+  });
+
+  const isLinked = !!(deployment?.cloud_provider_account_id && deployment?.cloud_resource_identifier);
+
+  return (
+    <Stack spacing={2}>
+      <Paper sx={{ p: 2.5 }}>
+        <Typography variant="h6" gutterBottom>
+          Cloud account link
+        </Typography>
+        {isLinked ? (
+          <Stack spacing={1}>
+            <Typography variant="body2">
+              Linked to{" "}
+              <strong>
+                {linkedAccount ? `${linkedAccount.account_name} (${linkedAccount.provider})` : `account #${deployment?.cloud_provider_account_id}`}
+              </strong>
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Resource: {deployment?.cloud_resource_identifier}
+            </Typography>
+          </Stack>
+        ) : (
+          <Typography variant="body2" color="text.secondary">
+            Not linked to a cloud provider account yet - real-time metrics cannot be synced until this
+            deployment is linked to one of your Cloud Accounts and given a resource identifier (e.g. an
+            AWS EC2 instance ID).
+          </Typography>
+        )}
+
+        {hasRole("operator", "admin") && (
+          <Box sx={{ mt: 2 }}>
+            <Button variant="outlined" onClick={() => setLinkOpen(true)}>
+              {isLinked ? "Change link" : "Link a cloud account"}
+            </Button>
+          </Box>
+        )}
+      </Paper>
+
+      <Paper sx={{ p: 2.5 }}>
+        <Typography variant="h6" gutterBottom>
+          Sync now
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Pull live resource-usage metrics from the linked cloud account right now, in addition to the
+          automatic background sync (every {" "}
+          <code>CLOUD_SYNC_INTERVAL_MINUTES</code> minutes).
+        </Typography>
+        <ErrorAlert error={syncMutation.error} />
+        {syncResult && (
+          <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSyncResult(null)}>
+            Synced {syncResult.provider} resource {syncResult.resource_identifier} at{" "}
+            {formatDateTime(syncResult.synced_at)}.
+          </Alert>
+        )}
+        {hasRole("operator", "admin") ? (
+          <Button
+            startIcon={<CloudSyncIcon />}
+            variant="contained"
+            disabled={!isLinked}
+            loading={syncMutation.isPending}
+            onClick={() => syncMutation.mutate()}
+          >
+            Sync now
+          </Button>
+        ) : (
+          <Typography variant="body2" color="text.secondary">
+            Only operators and admins can trigger a sync.
+          </Typography>
+        )}
+      </Paper>
+
+      <LinkCloudAccountDialog
+        deploymentId={deploymentId}
+        currentAccountId={deployment?.cloud_provider_account_id ?? null}
+        currentResourceIdentifier={deployment?.cloud_resource_identifier ?? null}
+        open={linkOpen}
+        onClose={() => setLinkOpen(false)}
+      />
+    </Stack>
+  );
+}
+
+function LinkCloudAccountDialog({
+  deploymentId,
+  currentAccountId,
+  currentResourceIdentifier,
+  open,
+  onClose,
+}: {
+  deploymentId: number;
+  currentAccountId: number | null;
+  currentResourceIdentifier: string | null;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [accountId, setAccountId] = useState<string>(currentAccountId ? String(currentAccountId) : "");
+  const [resourceIdentifier, setResourceIdentifier] = useState(currentResourceIdentifier ?? "");
+  const queryClient = useQueryClient();
+
+  const accountsQuery = useQuery({
+    queryKey: ["cloud-provider-accounts", "for-link"],
+    queryFn: () => cloudProviderAccountsApi.list({ pageSize: 100 }),
+    enabled: open,
+  });
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      deploymentsApi.update(deploymentId, {
+        cloud_provider_account_id: Number(accountId),
+        cloud_resource_identifier: resourceIdentifier.trim(),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["deployments", deploymentId] });
+      onClose();
+    },
+  });
+
+  const isValid = accountId !== "" && resourceIdentifier.trim() !== "";
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle>Link cloud provider account</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <ErrorAlert error={mutation.error} />
+          <TextField
+            select
+            label="Cloud account"
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+            fullWidth
+            helperText={
+              accountsQuery.data?.items.length === 0
+                ? "No cloud accounts yet - add one on the Cloud Accounts page first."
+                : undefined
+            }
+          >
+            {(accountsQuery.data?.items ?? []).map((account) => (
+              <MenuItem key={account.id} value={String(account.id)}>
+                {account.account_name} ({account.provider}, {account.region})
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            label="Resource identifier"
+            placeholder="e.g. i-0123456789abcdef0"
+            value={resourceIdentifier}
+            onChange={(e) => setResourceIdentifier(e.target.value)}
+            helperText="The provider-specific resource this deployment maps to (an AWS EC2 instance ID, for AWS accounts)."
+            fullWidth
+          />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" disabled={!isValid} loading={mutation.isPending} onClick={() => mutation.mutate()}>
+          Save
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }

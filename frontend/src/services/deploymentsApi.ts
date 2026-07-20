@@ -1,5 +1,5 @@
 import { httpClient } from "./httpClient";
-import type { Deployment, DeploymentStatus, PaginatedResponse } from "@/types";
+import type { CloudSyncResult, Deployment, DeploymentStatus, PaginatedResponse } from "@/types";
 
 export interface DeploymentPayload {
   name: string;
@@ -9,6 +9,8 @@ export interface DeploymentPayload {
   replicas?: number;
   status?: DeploymentStatus;
   memory_limit_mb?: number | null;
+  cloud_provider_account_id?: number | null;
+  cloud_resource_identifier?: string | null;
 }
 
 export const deploymentsApi = {
@@ -38,4 +40,9 @@ export const deploymentsApi = {
 
   remove: (deploymentId: number) =>
     httpClient.delete(`/deployments/${deploymentId}`).then(() => undefined),
+
+  syncCloudMetrics: (deploymentId: number) =>
+    httpClient
+      .post<CloudSyncResult>(`/deployments/${deploymentId}/sync-cloud-metrics`)
+      .then((r) => r.data),
 };
