@@ -105,7 +105,30 @@ empty diff.
 - Live end-to-end verification through the real nginx-proxied frontend (`http://localhost:3000/api/...`): registered a fresh user, logged in, fetched `/auth/me` (which resolves the user's roles across the database boundary via `user_roles`), and listed pre-existing projects created *before* this migration - each one's `owner_id` still resolves correctly against the moved `users` table
 - Test data created during verification was deleted afterward, not left in the shared dev database
 
-## 5. Known Limitations (disclosed, not hidden)
+## 5. Follow-Up: Frontend Container Healthcheck Fix
+
+Immediately after this phase's live verification, a standing, unrelated
+bug was noticed: `docker compose ps` reported the frontend container as
+"unhealthy" continuously (`FailingStreak` over 150 checks). Investigation
+found nginx itself was working correctly the entire time - every real
+request in the container logs succeeded - the healthcheck itself was
+broken: `frontend/Dockerfile`'s `HEALTHCHECK` ran `wget http://localhost:80/`,
+and `nginx.conf` only binds IPv4 (`listen 80` => `0.0.0.0:80`), but
+`localhost` resolves to the IPv6 loopback first inside the container,
+where nothing listens, so every check hit "Connection refused" against a
+server that was actually fine. Confirmed directly: `wget http://localhost:80/`
+failed, `wget http://127.0.0.1:80/` succeeded immediately, and `netstat`
+showed nginx bound only to `0.0.0.0:80`. Fixed by pointing the healthcheck
+at `127.0.0.1` explicitly - the container now reports `healthy`.
+
+Re-verified afterward with a full browser walkthrough (Dashboard,
+Projects, Cloud Accounts, and a Deployment detail page including the
+Phase 12 Cloud Sync tab): correct MUI theming, sidebar navigation with
+accurate active-page highlighting, populated tables and charts, and a
+working dark-mode toggle, confirming the healthcheck fix (and the
+Phase 12/13 changes preceding it) introduced no visual regressions.
+
+## 6. Known Limitations (disclosed, not hidden)
 
 - **Not a fully separate database instance.** Both databases still share one MySQL server/container/volume - a genuine logical and access-control separation, but not physical isolation. A true separate auth microservice (its own container, its own volume, no DB-level FK at all) was considered and explicitly declined in favor of this lower-risk approach - see the architecture decision above.
 - **No password/credential-format changes.** This phase only relocates *where* credentials are stored, not *how* - passwords are still bcrypt-hashed exactly as before; nothing about the authentication logic itself changed.
