@@ -11,6 +11,7 @@ from app.authentication.dependencies import get_current_active_user
 from app.controllers.cloud_provider_account_controller import CloudProviderAccountController
 from app.database.session import get_db
 from app.models.user import User
+from app.schemas.alert import AlertRead
 from app.schemas.cloud_provider_account import (
     CloudAccountDeploymentSummary,
     CloudProviderAccountCreate,
@@ -126,3 +127,24 @@ def list_cloud_provider_account_deployments(
     current_user: User = Depends(get_current_active_user),
 ) -> list[CloudAccountDeploymentSummary]:
     return CloudProviderAccountController(db).list_linked_deployments(account_id, current_user.id)
+
+
+@router.get(
+    "/{account_id}/alerts",
+    response_model=list[AlertRead],
+    summary=(
+        "List active alerts for deployments linked to one of the current user's own cloud "
+        "provider accounts - this account's own alert feed, distinct from the platform-wide "
+        "/alerts listing"
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+    },
+)
+def list_cloud_provider_account_alerts(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> list[AlertRead]:
+    return CloudProviderAccountController(db).list_active_alerts(account_id, current_user.id)

@@ -14,7 +14,6 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { StatusChip } from "@/components/StatusChip";
 import { CloudAccountFormDialog } from "@/components/CloudAccountFormDialog";
-import { AccountUsageDialog } from "@/components/AccountUsageDialog";
 import { projectsApi } from "@/services/projectsApi";
 import { alertsApi } from "@/services/alertsApi";
 import { optimizationApi } from "@/services/optimizationApi";
@@ -23,12 +22,10 @@ import { cloudProviderAccountsApi } from "@/services/cloudProviderAccountsApi";
 import { formatRelativeTime } from "@/utils/formatters";
 import { providerLabel } from "@/utils/cloudProviders";
 import { useAuth } from "@/contexts/AuthContext";
-import type { CloudProviderAccount } from "@/types";
 
 export function DashboardPage() {
   const { user } = useAuth();
   const [addAccountOpen, setAddAccountOpen] = useState(false);
-  const [usageAccount, setUsageAccount] = useState<CloudProviderAccount | null>(null);
 
   const projectsQuery = useQuery({
     queryKey: ["projects", "count"],
@@ -149,10 +146,11 @@ export function DashboardPage() {
                   </Stack>
                   <Button
                     size="small"
+                    component={RouterLink}
+                    to={`/cloud-accounts/${account.id}`}
                     startIcon={<MonitorHeartOutlinedIcon fontSize="small" />}
-                    onClick={() => setUsageAccount(account)}
                   >
-                    Usage
+                    Monitor
                   </Button>
                 </Paper>
               </Grid>
@@ -161,62 +159,63 @@ export function DashboardPage() {
         )}
       </Paper>
 
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Paper sx={{ p: 2.5 }}>
-            <Typography variant="h6" gutterBottom>
-              Recent alerts
-            </Typography>
-            <Stack spacing={1.5}>
-              {activeAlertsQuery.data?.items.length === 0 && (
-                <Typography variant="body2" color="text.secondary">
-                  No active alerts right now.
-                </Typography>
-              )}
-              {activeAlertsQuery.data?.items.map((alert) => (
-                <Stack key={alert.id} direction="row" justifyContent="space-between" alignItems="center">
-                  <Stack>
-                    <Typography variant="body2">{alert.message}</Typography>
+      {(cloudAccountsQuery.data?.items.length ?? 0) > 0 && (
+        <Grid container spacing={2}>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Paper sx={{ p: 2.5 }}>
+              <Typography variant="h6" gutterBottom>
+                Recent alerts
+              </Typography>
+              <Stack spacing={1.5}>
+                {activeAlertsQuery.data?.items.length === 0 && (
+                  <Typography variant="body2" color="text.secondary">
+                    No active alerts right now.
+                  </Typography>
+                )}
+                {activeAlertsQuery.data?.items.map((alert) => (
+                  <Stack key={alert.id} direction="row" justifyContent="space-between" alignItems="center">
+                    <Stack>
+                      <Typography variant="body2">{alert.message}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Deployment #{alert.deployment_id} - {formatRelativeTime(alert.triggered_at)}
+                      </Typography>
+                    </Stack>
+                    <StatusChip value={alert.severity} />
+                  </Stack>
+                ))}
+              </Stack>
+            </Paper>
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Paper sx={{ p: 2.5 }}>
+              <Typography variant="h6" gutterBottom>
+                Recent optimization recommendations
+              </Typography>
+              <Stack spacing={1.5}>
+                {pendingRecommendationsQuery.data?.items.length === 0 && (
+                  <Typography variant="body2" color="text.secondary">
+                    No pending recommendations.
+                  </Typography>
+                )}
+                {pendingRecommendationsQuery.data?.items.map((recommendation) => (
+                  <Stack key={recommendation.id}>
+                    <Typography variant="body2">{recommendation.description}</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Deployment #{alert.deployment_id} - {formatRelativeTime(alert.triggered_at)}
+                      Deployment #{recommendation.deployment_id} - {recommendation.recommendation_type}
                     </Typography>
                   </Stack>
-                  <StatusChip value={alert.severity} />
-                </Stack>
-              ))}
-            </Stack>
-          </Paper>
+                ))}
+              </Stack>
+            </Paper>
+          </Grid>
         </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Paper sx={{ p: 2.5 }}>
-            <Typography variant="h6" gutterBottom>
-              Recent optimization recommendations
-            </Typography>
-            <Stack spacing={1.5}>
-              {pendingRecommendationsQuery.data?.items.length === 0 && (
-                <Typography variant="body2" color="text.secondary">
-                  No pending recommendations.
-                </Typography>
-              )}
-              {pendingRecommendationsQuery.data?.items.map((recommendation) => (
-                <Stack key={recommendation.id}>
-                  <Typography variant="body2">{recommendation.description}</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Deployment #{recommendation.deployment_id} - {recommendation.recommendation_type}
-                  </Typography>
-                </Stack>
-              ))}
-            </Stack>
-          </Paper>
-        </Grid>
-      </Grid>
+      )}
 
       <CloudAccountFormDialog
         open={addAccountOpen}
         account={null}
         onClose={() => setAddAccountOpen(false)}
       />
-      <AccountUsageDialog account={usageAccount} onClose={() => setUsageAccount(null)} />
     </>
   );
 }

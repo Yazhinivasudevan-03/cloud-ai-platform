@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Chip, IconButton, Stack, Typography } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
@@ -10,7 +11,6 @@ import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { CloudAccountFormDialog } from "@/components/CloudAccountFormDialog";
-import { AccountUsageDialog } from "@/components/AccountUsageDialog";
 import { cloudProviderAccountsApi } from "@/services/cloudProviderAccountsApi";
 import { formatDateTime } from "@/utils/formatters";
 import { providerLabel } from "@/utils/cloudProviders";
@@ -18,12 +18,12 @@ import type { CloudProviderAccount } from "@/types";
 
 export function CloudAccountsPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [formOpen, setFormOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<CloudProviderAccount | null>(null);
   const [accountToDelete, setAccountToDelete] = useState<CloudProviderAccount | null>(null);
-  const [usageAccount, setUsageAccount] = useState<CloudProviderAccount | null>(null);
 
   const accountsQuery = useQuery({
     queryKey: ["cloud-provider-accounts", page, pageSize],
@@ -67,7 +67,11 @@ export function CloudAccountsPage() {
       align: "right",
       render: (a) => (
         <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-          <IconButton size="small" aria-label="View usage" onClick={() => setUsageAccount(a)}>
+          <IconButton
+            size="small"
+            aria-label="Monitor cloud account"
+            onClick={() => navigate(`/cloud-accounts/${a.id}`)}
+          >
             <MonitorHeartOutlinedIcon fontSize="small" />
           </IconButton>
           <IconButton
@@ -140,8 +144,6 @@ export function CloudAccountsPage() {
         onCancel={() => setAccountToDelete(null)}
         onConfirm={() => accountToDelete && deleteMutation.mutate(accountToDelete.id)}
       />
-
-      <AccountUsageDialog account={usageAccount} onClose={() => setUsageAccount(null)} />
     </>
   );
 }

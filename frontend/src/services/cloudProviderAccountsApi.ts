@@ -1,5 +1,6 @@
 import { httpClient } from "./httpClient";
 import type {
+  Alert,
   CloudAccountDeploymentSummary,
   CloudProviderAccount,
   CloudProviderAccountCreate,
@@ -43,4 +44,7 @@ export const cloudProviderAccountsApi = {
     httpClient
       .get<CloudAccountDeploymentSummary[]>(`/cloud-provider-accounts/${accountId}/deployments`)
       .then((r) => r.data),
+
+  listActiveAlerts: (accountId: number) =>
+    httpClient.get<Alert[]>(`/cloud-provider-accounts/${accountId}/alerts`).then((r) => r.data),
 };

@@ -24,6 +24,20 @@ class AlertRepository(BaseRepository[Alert]):
         )
         return list(self.db.scalars(stmt).all())
 
+    def list_active_for_deployments(self, deployment_ids: list[int]) -> list[Alert]:
+        """Every active alert across a set of deployments in one query -
+        used to show a cloud provider account's alerts as a single list
+        (see CloudProviderAccountService.list_active_alerts), rather than
+        one query per linked deployment."""
+        if not deployment_ids:
+            return []
+        stmt = (
+            select(Alert)
+            .where(Alert.deployment_id.in_(deployment_ids), Alert.status == "active")
+            .order_by(Alert.triggered_at.desc())
+        )
+        return list(self.db.scalars(stmt).all())
+
     def search(
         self,
         deployment_id: int | None,

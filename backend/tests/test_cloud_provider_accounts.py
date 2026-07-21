@@ -399,3 +399,126 @@ def test_linked_deployments_nonexistent_account_returns_404(client, make_user_wi
     )
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "CLOUD_ACCOUNT_NOT_FOUND"
+
+
+# --- Per-account active alerts feed -----------------------------------------
+
+
+def test_account_alerts_empty_when_no_alerts(client, make_user_with_role):
+    token = make_user_with_role("cloud_user_bb", "operator")
+    account = client.post(
+        "/api/v1/cloud-provider-accounts", json=_payload(), headers=_auth_header(token)
+    ).json()
+
+    response = client.get(
+        f"/api/v1/cloud-provider-accounts/{account['id']}/alerts", headers=_auth_header(token)
+    )
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_account_alerts_shows_active_alert_for_linked_deployment(client, make_user_with_role):
+    token = make_user_with_role("cloud_user_cc", "admin")
+    account = client.post(
+        "/api/v1/cloud-provider-accounts", json=_payload(), headers=_auth_header(token)
+    ).json()
+    deployment = _make_deployment(client, token, "cc")
+    client.put(
+        f"/api/v1/deployments/{deployment['id']}",
+        json={"cloud_provider_account_id": account["id"], "cloud_resource_identifier": "i-alerts-test"},
+        headers=_auth_header(token),
+    )
+    client.post(
+        f"/api/v1/deployments/{deployment['id']}/resource-usage",
+        json={
+            "cpu_usage_percent": 90.0,
+            "memory_usage_mb": 500.0,
+            "disk_usage_mb": 100.0,
+            "network_in_kbps": 10.0,
+            "network_out_kbps": 5.0,
+            "recorded_at": "2026-01-01T00:00:00Z",
+        },
+        headers=_auth_header(token),
+    )
+    client.post("/api/v1/alerts/evaluate", headers=_auth_header(token))
+
+    response = client.get(
+        f"/api/v1/cloud-provider-accounts/{account['id']}/alerts", headers=_auth_header(token)
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["alert_type"] == "cpu_high"
+    assert body[0]["severity"] == "critical"
+    assert body[0]["status"] == "active"
+
+
+def test_account_alerts_only_shows_alerts_for_that_accounts_deployments(client, make_user_with_role):
+    token = make_user_with_role("cloud_user_dd", "admin")
+    account_a = client.post(
+        "/api/v1/cloud-provider-accounts",
+        json=_payload(account_name="alerts-account-a"),
+        headers=_auth_header(token),
+    ).json()
+    account_b = client.post(
+        "/api/v1/cloud-provider-accounts",
+        json=_payload(account_name="alerts-account-b"),
+        headers=_auth_header(token),
+    ).json()
+    deployment_a = _make_deployment(client, token, "dd-a")
+    deployment_b = _make_deployment(client, token, "dd-b")
+    client.put(
+        f"/api/v1/deployments/{deployment_a['id']}",
+        json={"cloud_provider_account_id": account_a["id"], "cloud_resource_identifier": "i-a"},
+        headers=_auth_header(token),
+    )
+    client.put(
+        f"/api/v1/deployments/{deployment_b['id']}",
+        json={"cloud_provider_account_id": account_b["id"], "cloud_resource_identifier": "i-b"},
+        headers=_auth_header(token),
+    )
+    for dep in (deployment_a, deployment_b):
+        client.post(
+            f"/api/v1/deployments/{dep['id']}/resource-usage",
+            json={
+                "cpu_usage_percent": 90.0,
+                "memory_usage_mb": 500.0,
+                "disk_usage_mb": 100.0,
+                "network_in_kbps": 10.0,
+                "network_out_kbps": 5.0,
+                "recorded_at": "2026-01-01T00:00:00Z",
+            },
+            headers=_auth_header(token),
+        )
+    client.post("/api/v1/alerts/evaluate", headers=_auth_header(token))
+
+    response = client.get(
+        f"/api/v1/cloud-provider-accounts/{account_a['id']}/alerts", headers=_auth_header(token)
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["deployment_id"] == deployment_a["id"]
+
+
+def test_cannot_list_account_alerts_for_another_users_account(client, make_user_with_role):
+    token_a = make_user_with_role("cloud_user_ee", "operator")
+    token_b = make_user_with_role("cloud_user_ff", "operator")
+    account = client.post(
+        "/api/v1/cloud-provider-accounts", json=_payload(), headers=_auth_header(token_a)
+    ).json()
+
+    response = client.get(
+        f"/api/v1/cloud-provider-accounts/{account['id']}/alerts", headers=_auth_header(token_b)
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "NOT_YOUR_CLOUD_ACCOUNT"
+
+
+def test_account_alerts_nonexistent_account_returns_404(client, make_user_with_role):
+    token = make_user_with_role("cloud_user_gg", "operator")
+    response = client.get(
+        "/api/v1/cloud-provider-accounts/999999/alerts", headers=_auth_header(token)
+    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "CLOUD_ACCOUNT_NOT_FOUND"

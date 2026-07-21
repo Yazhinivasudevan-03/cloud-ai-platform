@@ -3,6 +3,7 @@ import math
 
 from sqlalchemy.orm import Session
 
+from app.schemas.alert import AlertRead
 from app.schemas.cloud_provider_account import (
     CloudAccountDeploymentSummary,
     CloudProviderAccountCreate,
@@ -62,3 +63,7 @@ class CloudProviderAccountController:
             )
             for deployment, usage in pairs
         ]
+
+    def list_active_alerts(self, account_id: int, current_user_id: int) -> list[AlertRead]:
+        alerts = self.service.list_active_alerts(account_id, current_user_id)
+        return [AlertRead.model_validate(a) for a in alerts]

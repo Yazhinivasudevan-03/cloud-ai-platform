@@ -19,11 +19,6 @@ import {
 import MenuIcon from "@mui/icons-material/Menu";
 import CloudQueueIcon from "@mui/icons-material/CloudQueue";
 import DashboardIcon from "@mui/icons-material/DashboardOutlined";
-import FolderIcon from "@mui/icons-material/FolderOutlined";
-import NotificationsActiveIcon from "@mui/icons-material/NotificationsActiveOutlined";
-import TuneIcon from "@mui/icons-material/TuneOutlined";
-import MailIcon from "@mui/icons-material/MailOutlined";
-import CloudSyncIcon from "@mui/icons-material/CloudSyncOutlined";
 import PeopleIcon from "@mui/icons-material/PeopleOutlined";
 import Brightness4Icon from "@mui/icons-material/Brightness4";
 import Brightness7Icon from "@mui/icons-material/Brightness7";
@@ -34,14 +29,11 @@ import { UserMenu } from "@/components/UserMenu";
 
 const DRAWER_WIDTH = 240;
 
-const NAV_ITEMS = [
-  { label: "Dashboard", to: "/", icon: <DashboardIcon /> },
-  { label: "Projects", to: "/projects", icon: <FolderIcon /> },
-  { label: "Alerts", to: "/alerts", icon: <NotificationsActiveIcon /> },
-  { label: "Optimization", to: "/optimization", icon: <TuneIcon /> },
-  { label: "Notifications", to: "/notifications", icon: <MailIcon /> },
-  { label: "Cloud Accounts", to: "/cloud-accounts", icon: <CloudSyncIcon /> },
-];
+// Projects/Alerts/Optimization/Notifications/Cloud Accounts are reached
+// from the Dashboard itself (stat cards + the Cloud Accounts panel) - see
+// docs/PHASE_16.md - so the sidebar stays down to just the two entry
+// points that aren't already covered there.
+const NAV_ITEMS = [{ label: "Dashboard", to: "/", icon: <DashboardIcon /> }];
 
 export function AppLayout() {
   const theme = useTheme();

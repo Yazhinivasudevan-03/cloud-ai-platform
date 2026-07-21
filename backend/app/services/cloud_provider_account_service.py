@@ -3,9 +3,11 @@ only, same ownership pattern as NotificationService). No limit is enforced
 anywhere in this layer on how many accounts a single user may register."""
 from sqlalchemy.orm import Session
 
+from app.models.alert import Alert
 from app.models.cloud_provider_account import CloudProviderAccount
 from app.models.deployment import Deployment
 from app.models.resource_usage import ResourceUsage
+from app.repositories.alert_repository import AlertRepository
 from app.repositories.cloud_provider_account_repository import CloudProviderAccountRepository
 from app.repositories.deployment_repository import DeploymentRepository
 from app.repositories.resource_usage_repository import ResourceUsageRepository
@@ -20,6 +22,7 @@ class CloudProviderAccountService:
         self.repository = CloudProviderAccountRepository(db)
         self.deployment_repository = DeploymentRepository(db)
         self.resource_usage_repository = ResourceUsageRepository(db)
+        self.alert_repository = AlertRepository(db)
 
     def create(self, user_id: int, payload: CloudProviderAccountCreate) -> CloudProviderAccount:
         if self.repository.get_by_user_and_name(user_id, payload.account_name) is not None:
@@ -93,6 +96,15 @@ class CloudProviderAccountService:
             (deployment, self.resource_usage_repository.get_latest_for_deployment(deployment.id))
             for deployment in deployments
         ]
+
+    def list_active_alerts(self, account_id: int, current_user_id: int) -> list[Alert]:
+        """Every active alert for a deployment linked to this account - a
+        single cloud account's own alert feed, distinct from the platform-
+        wide /alerts listing (see docs/PHASE_16.md)."""
+        account = self._get_owned_or_raise(account_id, current_user_id)
+        deployments = self.deployment_repository.list_by_cloud_account(account.id)
+        deployment_ids = [d.id for d in deployments]
+        return self.alert_repository.list_active_for_deployments(deployment_ids)
 
     def _get_owned_or_raise(self, account_id: int, current_user_id: int) -> CloudProviderAccount:
         account = self.repository.get_by_id(account_id)
