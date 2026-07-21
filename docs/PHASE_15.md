@@ -89,7 +89,30 @@ rather than suppressing it.
   appears in the full table. Zero console errors throughout. Test data
   cleaned up afterward.
 
-## 5. Known Limitations (disclosed, not hidden)
+## 5. Follow-Up: The 4 Stat Cards Are Now Clickable
+
+Reported directly against a screenshot of the Dashboard's 4 stat cards
+(Projects, Active alerts, Pending recommendations, Unread notifications):
+"make the buttons to work" - they were static `Paper` elements with no
+click behavior at all.
+
+`StatCard` now accepts an optional `to` prop; when given, the whole card
+renders as a `react-router` `Link` (via MUI `Paper`'s polymorphic
+`component` prop) with a hover highlight, so it's visibly interactive
+rather than looking like inert text. All 4 Dashboard cards are wired:
+
+- **Projects** -> `/projects`
+- **Active alerts** -> `/alerts` (already defaulted to the "active" status filter, no query param needed)
+- **Pending recommendations** -> `/optimization` (already defaulted to "pending")
+- **Unread notifications** -> `/notifications?filter=unread` - this one needed new code, since `NotificationsPage` itself defaults to "All": added `useSearchParams` support so `?filter=unread` pre-selects "Unread"
+
+Verified live in a real browser: all 4 cards render as genuine `<a>`
+elements with a visible hover state, each navigates to the correct page,
+and the Notifications page specifically shows "Unread" (not "All")
+pre-selected in its filter dropdown when reached via the card. Zero
+console errors. No backend changes.
+
+## 6. Known Limitations (disclosed, not hidden)
 
 - **The Dashboard panel shows accounts, not their linked deployments'
   usage inline.** Clicking "Usage" opens the same dialog as the Cloud

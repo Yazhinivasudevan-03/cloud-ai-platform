@@ -62,7 +62,12 @@ export function DashboardPage() {
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <StatCard label="Projects" value={projectsQuery.data?.meta.total ?? "-"} icon={FolderIcon} />
+          <StatCard
+            label="Projects"
+            value={projectsQuery.data?.meta.total ?? "-"}
+            icon={FolderIcon}
+            to="/projects"
+          />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
@@ -70,6 +75,7 @@ export function DashboardPage() {
             value={activeAlertsQuery.data?.meta.total ?? "-"}
             icon={NotificationsActiveIcon}
             color="error.main"
+            to="/alerts"
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -78,6 +84,7 @@ export function DashboardPage() {
             value={pendingRecommendationsQuery.data?.meta.total ?? "-"}
             icon={TuneIcon}
             color="warning.main"
+            to="/optimization"
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -86,6 +93,7 @@ export function DashboardPage() {
             value={unreadNotificationsQuery.data?.meta.total ?? "-"}
             icon={MailIcon}
             color="secondary.main"
+            to="/notifications?filter=unread"
           />
         </Grid>
       </Grid>

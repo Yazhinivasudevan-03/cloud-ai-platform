@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { PageHeader } from "@/components/PageHeader";
@@ -15,9 +16,13 @@ const READ_OPTIONS = [
 
 export function NotificationsPage() {
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [readFilter, setReadFilter] = useState("");
+  // Supports being linked to directly with a pre-applied filter, e.g. the
+  // Dashboard's "Unread notifications" stat card links to
+  // /notifications?filter=unread.
+  const [readFilter, setReadFilter] = useState(searchParams.get("filter") === "unread" ? "false" : "");
 
   const query = useQuery({
     queryKey: ["notifications", "page", page, pageSize, readFilter],
