@@ -1,26 +1,42 @@
+import { useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Paper, Stack, Typography } from "@mui/material";
+import { Button, Chip, Paper, Stack, Typography } from "@mui/material";
 import Grid from "@mui/material/Grid2";
+import AddIcon from "@mui/icons-material/Add";
+import CloudQueueIcon from "@mui/icons-material/CloudQueueOutlined";
 import FolderIcon from "@mui/icons-material/FolderOutlined";
+import MonitorHeartOutlinedIcon from "@mui/icons-material/MonitorHeartOutlined";
 import NotificationsActiveIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import TuneIcon from "@mui/icons-material/TuneOutlined";
 import MailIcon from "@mui/icons-material/MailOutlined";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { StatusChip } from "@/components/StatusChip";
+import { CloudAccountFormDialog } from "@/components/CloudAccountFormDialog";
+import { AccountUsageDialog } from "@/components/AccountUsageDialog";
 import { projectsApi } from "@/services/projectsApi";
 import { alertsApi } from "@/services/alertsApi";
 import { optimizationApi } from "@/services/optimizationApi";
 import { notificationsApi } from "@/services/notificationsApi";
+import { cloudProviderAccountsApi } from "@/services/cloudProviderAccountsApi";
 import { formatRelativeTime } from "@/utils/formatters";
+import { providerLabel } from "@/utils/cloudProviders";
 import { useAuth } from "@/contexts/AuthContext";
+import type { CloudProviderAccount } from "@/types";
 
 export function DashboardPage() {
   const { user } = useAuth();
+  const [addAccountOpen, setAddAccountOpen] = useState(false);
+  const [usageAccount, setUsageAccount] = useState<CloudProviderAccount | null>(null);
 
   const projectsQuery = useQuery({
     queryKey: ["projects", "count"],
     queryFn: () => projectsApi.list({ page: 1, pageSize: 1 }),
+  });
+  const cloudAccountsQuery = useQuery({
+    queryKey: ["cloud-provider-accounts", "dashboard"],
+    queryFn: () => cloudProviderAccountsApi.list({ page: 1, pageSize: 10 }),
   });
   const activeAlertsQuery = useQuery({
     queryKey: ["alerts", "active-count"],
@@ -74,6 +90,69 @@ export function DashboardPage() {
         </Grid>
       </Grid>
 
+      <Paper sx={{ p: 2.5, mb: 3 }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" spacing={1}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <CloudQueueIcon color="action" />
+            <Typography variant="h6">Cloud Accounts</Typography>
+          </Stack>
+          <Stack direction="row" spacing={1}>
+            {(cloudAccountsQuery.data?.items.length ?? 0) > 0 && (
+              <Button component={RouterLink} to="/cloud-accounts" size="small">
+                Manage all
+              </Button>
+            )}
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setAddAccountOpen(true)}
+            >
+              Connect a cloud account
+            </Button>
+          </Stack>
+        </Stack>
+
+        {cloudAccountsQuery.data?.items.length === 0 && (
+          <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
+            Connect an AWS, Azure, GCP, or any other cloud provider account to start monitoring its
+            deployments' live CPU, memory, and network usage right here.
+          </Typography>
+        )}
+
+        {cloudAccountsQuery.data && cloudAccountsQuery.data.items.length > 0 && (
+          <Grid container spacing={1.5} sx={{ mt: 0.5 }}>
+            {cloudAccountsQuery.data.items.map((account) => (
+              <Grid key={account.id} size={{ xs: 12, sm: 6, md: 4 }}>
+                <Paper
+                  variant="outlined"
+                  sx={{ p: 1.5, display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                >
+                  <Stack>
+                    <Typography variant="body2" fontWeight={600}>
+                      {account.account_name}
+                    </Typography>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <Chip size="small" label={providerLabel(account.provider)} />
+                      <Typography variant="caption" color="text.secondary">
+                        {account.region}
+                      </Typography>
+                    </Stack>
+                  </Stack>
+                  <Button
+                    size="small"
+                    startIcon={<MonitorHeartOutlinedIcon fontSize="small" />}
+                    onClick={() => setUsageAccount(account)}
+                  >
+                    Usage
+                  </Button>
+                </Paper>
+              </Grid>
+            ))}
+          </Grid>
+        )}
+      </Paper>
+
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, md: 6 }}>
           <Paper sx={{ p: 2.5 }}>
@@ -123,6 +202,13 @@ export function DashboardPage() {
           </Paper>
         </Grid>
       </Grid>
+
+      <CloudAccountFormDialog
+        open={addAccountOpen}
+        account={null}
+        onClose={() => setAddAccountOpen(false)}
+      />
+      <AccountUsageDialog account={usageAccount} onClose={() => setUsageAccount(null)} />
     </>
   );
 }

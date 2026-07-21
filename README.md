@@ -24,6 +24,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 | 12 | Real-time cloud metrics sync (real AWS CloudWatch via boto3, scheduled + on-demand) | **Complete** - see [`docs/PHASE_12.md`](docs/PHASE_12.md) |
 | 13 | Separate database for login credentials (users/roles isolated from application data, same MySQL server) | **Complete** - see [`docs/PHASE_13.md`](docs/PHASE_13.md) |
 | 14 | Consolidated cloud account usage view (live CPU/memory/network per account, at a glance) | **Complete** - see [`docs/PHASE_14.md`](docs/PHASE_14.md) |
+| 15 | Connect cloud accounts (AWS/Azure/GCP/Other) directly from the Dashboard | **Complete** - see [`docs/PHASE_15.md`](docs/PHASE_15.md) |
 
 ## Repository layout
 
@@ -122,7 +123,11 @@ Click "View usage" on any row in **Cloud Accounts** to see every
 deployment linked to that account with its live CPU/memory/network at a
 glance, without opening each deployment individually - see [`docs/PHASE_14.md`](docs/PHASE_14.md).
 
-Full instructions, commands, and troubleshooting: [`docs/PHASE_1.md`](docs/PHASE_1.md), [`docs/PHASE_2.md`](docs/PHASE_2.md), [`docs/PHASE_3.md`](docs/PHASE_3.md), [`docs/PHASE_4.md`](docs/PHASE_4.md), [`docs/PHASE_5.md`](docs/PHASE_5.md), [`docs/PHASE_6.md`](docs/PHASE_6.md), [`docs/PHASE_7.md`](docs/PHASE_7.md), [`docs/PHASE_8.md`](docs/PHASE_8.md), [`docs/PHASE_9.md`](docs/PHASE_9.md), [`docs/PHASE_10.md`](docs/PHASE_10.md), [`docs/PHASE_11.md`](docs/PHASE_11.md), [`docs/PHASE_12.md`](docs/PHASE_12.md), [`docs/PHASE_13.md`](docs/PHASE_13.md), [`docs/PHASE_14.md`](docs/PHASE_14.md).
+Connect an AWS/Azure/GCP/other cloud account and view its usage right
+from the **Dashboard** - the page you land on after logging in - no need
+to navigate to a separate page first - see [`docs/PHASE_15.md`](docs/PHASE_15.md).
+
+Full instructions, commands, and troubleshooting: [`docs/PHASE_1.md`](docs/PHASE_1.md), [`docs/PHASE_2.md`](docs/PHASE_2.md), [`docs/PHASE_3.md`](docs/PHASE_3.md), [`docs/PHASE_4.md`](docs/PHASE_4.md), [`docs/PHASE_5.md`](docs/PHASE_5.md), [`docs/PHASE_6.md`](docs/PHASE_6.md), [`docs/PHASE_7.md`](docs/PHASE_7.md), [`docs/PHASE_8.md`](docs/PHASE_8.md), [`docs/PHASE_9.md`](docs/PHASE_9.md), [`docs/PHASE_10.md`](docs/PHASE_10.md), [`docs/PHASE_11.md`](docs/PHASE_11.md), [`docs/PHASE_12.md`](docs/PHASE_12.md), [`docs/PHASE_13.md`](docs/PHASE_13.md), [`docs/PHASE_14.md`](docs/PHASE_14.md), [`docs/PHASE_15.md`](docs/PHASE_15.md).
 
 ## Technology stack
 
