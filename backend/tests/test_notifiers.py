@@ -7,7 +7,10 @@ made to the underlying client when configured (mocked, not live) - see
 docs/PHASE_5.md for the explicit disclosure that live external delivery was
 not verified end-to-end.
 """
+import smtplib
 from unittest.mock import MagicMock, patch
+
+import httpx
 
 from app.config.settings import get_settings
 from app.notifications.email_notifier import send_email
@@ -102,3 +105,101 @@ def test_send_telegram_message_calls_bot_api_when_configured(monkeypatch):
         json={"chat_id": "999", "text": "hello from the alert engine"},
         timeout=10,
     )
+
+
+# --- Retry/backoff on transient failures ------------------------------------
+
+
+def test_send_slack_message_retries_on_transient_error_then_succeeds(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SLACK_WEBHOOK_URL", "https://hooks.slack.example/webhook")
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+
+    with patch(
+        "app.notifications.slack_notifier.httpx.post",
+        side_effect=[httpx.ConnectError("connection refused"), mock_response],
+    ) as mock_post:
+        result = send_slack_message("hello")
+
+    assert result is True
+    assert mock_post.call_count == 2  # failed once, retried, succeeded
+
+
+def test_send_slack_message_returns_false_after_retries_exhausted(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SLACK_WEBHOOK_URL", "https://hooks.slack.example/webhook")
+
+    with patch(
+        "app.notifications.slack_notifier.httpx.post",
+        side_effect=httpx.ConnectError("connection refused"),
+    ) as mock_post:
+        result = send_slack_message("hello")
+
+    assert result is False  # degrades gracefully, never raises
+    assert mock_post.call_count == 3  # exhausted all 3 attempts
+
+
+def test_send_slack_message_does_not_retry_a_bad_webhook_url(monkeypatch):
+    """A 4xx (e.g. webhook deactivated/not found) is a config error, not a
+    transient failure - retrying it 3 times would only waste time."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SLACK_WEBHOOK_URL", "https://hooks.slack.example/webhook")
+
+    mock_response = MagicMock()
+    mock_response.status_code = 404
+    mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "Not Found", request=MagicMock(), response=mock_response
+    )
+
+    with patch("app.notifications.slack_notifier.httpx.post", return_value=mock_response) as mock_post:
+        result = send_slack_message("hello")
+
+    assert result is False
+    assert mock_post.call_count == 1  # no retry for a 4xx
+
+
+def test_send_email_retries_on_transient_error_then_succeeds(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.example.com")
+    monkeypatch.setattr(settings, "SMTP_PORT", 587)
+    monkeypatch.setattr(settings, "SMTP_USER", "")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "")
+    monkeypatch.setattr(settings, "SMTP_FROM_ADDRESS", "alerts@example.com")
+    monkeypatch.setattr(settings, "SMTP_USE_TLS", False)
+
+    mock_smtp_instance = MagicMock()
+    mock_smtp_context = MagicMock()
+    mock_smtp_context.__enter__.return_value = mock_smtp_instance
+    mock_smtp_context.__exit__.return_value = False
+
+    with patch(
+        "app.notifications.email_notifier.smtplib.SMTP",
+        side_effect=[ConnectionRefusedError("connection refused"), mock_smtp_context],
+    ) as mock_smtp_cls:
+        result = send_email("someone@example.com", "subject", "body")
+
+    assert result is True
+    assert mock_smtp_cls.call_count == 2
+
+
+def test_send_email_does_not_retry_authentication_failure(monkeypatch):
+    """A bad username/password is a permanent config error - retrying it
+    3 times just wastes time before failing anyway."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.example.com")
+    monkeypatch.setattr(settings, "SMTP_PORT", 587)
+    monkeypatch.setattr(settings, "SMTP_USER", "user")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "wrong-password")
+    monkeypatch.setattr(settings, "SMTP_FROM_ADDRESS", "alerts@example.com")
+    monkeypatch.setattr(settings, "SMTP_USE_TLS", False)
+
+    with patch(
+        "app.notifications.email_notifier.smtplib.SMTP",
+        side_effect=smtplib.SMTPAuthenticationError(535, b"Authentication failed"),
+    ) as mock_smtp_cls:
+        result = send_email("someone@example.com", "subject", "body")
+
+    assert result is False
+    assert mock_smtp_cls.call_count == 1

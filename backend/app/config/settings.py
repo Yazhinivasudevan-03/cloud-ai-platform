@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     OPTIMIZATION_TARGET_CPU_BAND: float = 15.0
     OPTIMIZATION_MAX_SCALE_REPLICAS: int = 10
     OPTIMIZATION_COST_RIGHTSIZING_SAVINGS_FRACTION: float = 0.15
+    # A dismissed/applied recommendation of a given type won't be recreated
+    # for this many minutes even if its condition still holds, so a
+    # deployment hovering right at a threshold doesn't get the exact same
+    # recommendation re-created on every evaluation run right after a user
+    # dismissed it.
+    OPTIMIZATION_RECOMMENDATION_COOLDOWN_MINUTES: int = 60
 
     # Real-time cloud metrics sync (Phase 12) - periodically pulls real
     # telemetry from each linked deployment's cloud provider account

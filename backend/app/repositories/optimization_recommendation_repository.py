@@ -1,4 +1,6 @@
 """Data-access layer for the OptimizationRecommendation entity."""
+from datetime import datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -28,6 +30,25 @@ class OptimizationRecommendationRepository(BaseRepository[OptimizationRecommenda
             OptimizationRecommendation.status == "pending",
         )
         return list(self.db.scalars(stmt).all())
+
+    def get_recently_resolved(
+        self, deployment_id: int, recommendation_type: str, since: datetime
+    ) -> OptimizationRecommendation | None:
+        """The most recent dismissed/applied recommendation of this type for
+        this deployment, if it was resolved on or after `since` - used to
+        enforce a cooldown so a recommendation isn't recreated the moment
+        after a user dismisses it, while its condition still holds."""
+        stmt = (
+            select(OptimizationRecommendation)
+            .where(
+                OptimizationRecommendation.deployment_id == deployment_id,
+                OptimizationRecommendation.recommendation_type == recommendation_type,
+                OptimizationRecommendation.status.in_(["dismissed", "applied"]),
+                OptimizationRecommendation.updated_at >= since,
+            )
+            .order_by(OptimizationRecommendation.updated_at.desc())
+        )
+        return self.db.scalars(stmt).first()
 
     def search(
         self,

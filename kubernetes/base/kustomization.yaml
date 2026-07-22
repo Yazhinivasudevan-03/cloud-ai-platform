@@ -36,3 +36,8 @@ resources:
   # explicitly when needed (`kubectl apply -f ml-models-job.yaml`), not part
   # of the always-on stack, mirroring the `profiles: ["ml"]` treatment this
   # same service gets in docker-compose.yml.
+  # backend-vpa.yaml is also intentionally NOT included here - it requires
+  # the VerticalPodAutoscaler CRD/controller, which isn't part of vanilla
+  # Kubernetes (unlike the HPA above) and isn't installed in the Docker
+  # Desktop cluster this project verifies against - see that file's own
+  # header comment for the explicit apply command.

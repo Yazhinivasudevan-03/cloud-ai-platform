@@ -110,7 +110,14 @@ def evaluate(
     target = settings.OPTIMIZATION_TARGET_CPU_PERCENT
     band = settings.OPTIMIZATION_TARGET_CPU_BAND
     if avg_cpu_usage_percent > target + band or avg_cpu_usage_percent < target - band:
-        desired_replicas = max(1, ceil(replicas * (avg_cpu_usage_percent / target)))
+        # Safety limit: never recommend below 1 replica or above the same
+        # practical ceiling the increase_pods/increase_cpu branch above
+        # already respects - a runaway CPU spike shouldn't be able to
+        # produce a recommendation to scale to an unbounded replica count.
+        desired_replicas = max(
+            1,
+            min(settings.OPTIMIZATION_MAX_SCALE_REPLICAS, ceil(replicas * (avg_cpu_usage_percent / target))),
+        )
         if desired_replicas != replicas:
             conditions.append(
                 RecommendationCondition(

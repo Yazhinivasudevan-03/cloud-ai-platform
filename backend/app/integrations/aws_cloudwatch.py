@@ -13,11 +13,41 @@ from typing import TypedDict
 
 import boto3
 import botocore.exceptions
+import tenacity
 
 from app.utils.exceptions import ValidationAppError
 
 _NAMESPACE = "AWS/EC2"
 _METRICS = ["CPUUtilization", "NetworkIn", "NetworkOut"]
+
+# Retries only genuinely transient failures - throttling and connection-level
+# issues - a few times with short backoff, so a momentary AWS API blip
+# doesn't fail an entire scheduled sync run. A non-transient rejection
+# (bad credentials, unknown instance) is a config problem no amount of
+# retrying fixes, so those fail on the first attempt as before.
+_RETRYABLE_CLIENT_ERROR_CODES = {
+    "Throttling",
+    "ThrottlingException",
+    "RequestLimitExceeded",
+    "TooManyRequestsException",
+    "ServiceUnavailable",
+    "InternalError",
+    "RequestTimeout",
+}
+
+
+def _is_retryable_aws_error(exc: BaseException) -> bool:
+    if isinstance(exc, botocore.exceptions.ClientError):
+        return exc.response.get("Error", {}).get("Code") in _RETRYABLE_CLIENT_ERROR_CODES
+    return isinstance(exc, botocore.exceptions.BotoCoreError)
+
+
+_cloudwatch_retry = tenacity.retry(
+    retry=tenacity.retry_if_exception(_is_retryable_aws_error),
+    stop=tenacity.stop_after_attempt(3),
+    wait=tenacity.wait_exponential(multiplier=1, min=1, max=8),
+    reraise=True,
+)
 
 
 class Ec2ResourceUsage(TypedDict):
@@ -82,8 +112,9 @@ def fetch_ec2_resource_usage(
     # hasn't reported yet.
     period_seconds = 60
 
-    try:
-        response = client.get_metric_data(
+    @_cloudwatch_retry
+    def _get_metric_data():
+        return client.get_metric_data(
             MetricDataQueries=[
                 {
                     "Id": metric.lower(),
@@ -102,6 +133,9 @@ def fetch_ec2_resource_usage(
             StartTime=start_time,
             EndTime=end_time,
         )
+
+    try:
+        response = _get_metric_data()
     except botocore.exceptions.ClientError as exc:
         # Covers invalid/expired/revoked credentials, insufficient IAM
         # permissions, throttling, bad region, etc. - anything CloudWatch

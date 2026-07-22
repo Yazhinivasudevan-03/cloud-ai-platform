@@ -113,3 +113,50 @@ def test_fetch_ec2_resource_usage_wraps_invalid_credentials_cleanly():
 
     assert exc_info.value.code == "CLOUDWATCH_REQUEST_FAILED"
     assert "InvalidClientTokenId" in str(exc_info.value)
+
+
+# --- Retry/backoff on transient failures ------------------------------------
+
+
+def _fake_metric_data_response() -> dict:
+    now = datetime.now(timezone.utc)
+    return {
+        "MetricDataResults": [
+            {"Id": "cpuutilization", "Values": [55.0], "Timestamps": [now]},
+            {"Id": "networkin", "Values": [], "Timestamps": []},
+            {"Id": "networkout", "Values": [], "Timestamps": []},
+        ]
+    }
+
+
+def test_fetch_ec2_resource_usage_retries_transient_error_then_succeeds():
+    # Throttling is a genuinely transient AWS response - the retry should
+    # transparently succeed on the second attempt rather than surfacing an
+    # error to the caller.
+    error_response = {"Error": {"Code": "Throttling", "Message": "Rate exceeded"}}
+    throttling_error = botocore.exceptions.ClientError(error_response, "GetMetricData")
+
+    with patch("boto3.client") as mock_client_factory:
+        mock_client_factory.return_value.get_metric_data.side_effect = [
+            throttling_error,
+            _fake_metric_data_response(),
+        ]
+        result = fetch_ec2_resource_usage(FAKE_CREDENTIALS, "us-east-1", "i-fake123", lookback_minutes=15)
+
+    assert result["cpu_usage_percent"] == pytest.approx(55.0)
+    assert mock_client_factory.return_value.get_metric_data.call_count == 2
+
+
+def test_fetch_ec2_resource_usage_does_not_retry_non_transient_client_error():
+    # InvalidClientTokenId (bad credentials) is a config error, not a
+    # transient one - retrying it 3 times would only waste time before
+    # failing anyway, so it must fail on the very first attempt.
+    error_response = {"Error": {"Code": "InvalidClientTokenId", "Message": "The security token is invalid"}}
+    client_error = botocore.exceptions.ClientError(error_response, "GetMetricData")
+
+    with patch("boto3.client") as mock_client_factory:
+        mock_client_factory.return_value.get_metric_data.side_effect = client_error
+        with pytest.raises(ValidationAppError):
+            fetch_ec2_resource_usage(FAKE_CREDENTIALS, "us-east-1", "i-fake123", lookback_minutes=15)
+
+    assert mock_client_factory.return_value.get_metric_data.call_count == 1

@@ -93,3 +93,16 @@ def test_cpu_within_target_band_does_not_recommend_scaling():
         avg_cpu_usage_percent=60.0, avg_memory_usage_mb=100.0, memory_limit_mb=None, replicas=3
     )
     assert "scale_deployment" not in _types(conditions)
+
+
+def test_scale_deployment_desired_replicas_is_capped_at_max_scale_replicas():
+    # Uncapped HPA formula: ceil(5 * 200/60) = 17 - a safety limit must clamp
+    # this to OPTIMIZATION_MAX_SCALE_REPLICAS (default 10), never suggesting
+    # scaling to an unbounded replica count off the back of a CPU spike.
+    conditions = evaluate(
+        avg_cpu_usage_percent=200.0, avg_memory_usage_mb=100.0, memory_limit_mb=None, replicas=5
+    )
+    scale_conditions = [c for c in conditions if c.recommendation_type == "scale_deployment"]
+    assert len(scale_conditions) == 1
+    assert "to 10 replica" in scale_conditions[0].description
+    assert "to 17 replica" not in scale_conditions[0].description

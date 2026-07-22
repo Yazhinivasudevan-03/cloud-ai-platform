@@ -19,6 +19,18 @@ backend:
     minReplicas: 2
     maxReplicas: 6
     targetCPUUtilizationPercentage: 60
+  # Off by default - the VerticalPodAutoscaler CRD/controller isn't part of
+  # vanilla Kubernetes (unlike the HPA above) and most clusters, including
+  # the Docker Desktop cluster this project verifies against, don't have it
+  # installed. Enabling this on a cluster without the controller installed
+  # will fail with an "unknown kind" error - only set to true after
+  # installing https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler.
+  vpa:
+    enabled: false
+    minAllowedCPU: 100m
+    minAllowedMemory: 256Mi
+    maxAllowedCPU: "1"
+    maxAllowedMemory: 1Gi
 
 frontend:
   image:

@@ -4,6 +4,8 @@ Phase 5's AlertEvaluationService: a pending recommendation is not re-created
 every run while its condition still holds, and is auto-dismissed once the
 condition clears.
 """
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -127,12 +129,20 @@ class OptimizationService:
                 existing.status = "dismissed"
                 recommendations_dismissed += 1
 
+        cooldown_since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            minutes=self.settings.OPTIMIZATION_RECOMMENDATION_COOLDOWN_MINUTES
+        )
+
         any_decrease = False
         for condition in conditions:
             if condition.direction == "decrease":
                 any_decrease = True
             if self.repository.get_pending(deployment_id, condition.recommendation_type):
                 continue  # already recommending this - no duplicate
+            if self.repository.get_recently_resolved(
+                deployment_id, condition.recommendation_type, cooldown_since
+            ):
+                continue  # dismissed/applied too recently - within cooldown, don't re-nag
             self.db.add(
                 OptimizationRecommendation(
                     deployment_id=deployment_id,
@@ -144,7 +154,7 @@ class OptimizationService:
             )
             recommendations_created += 1
 
-        if any_decrease and self._create_cost_recommendation(deployment):
+        if any_decrease and self._create_cost_recommendation(deployment, cooldown_since):
             recommendations_created += 1
 
         self.db.commit()
@@ -159,8 +169,10 @@ class OptimizationService:
         )
         return list(self.db.scalars(stmt).all())
 
-    def _create_cost_recommendation(self, deployment: Deployment) -> bool:
+    def _create_cost_recommendation(self, deployment: Deployment, cooldown_since: datetime) -> bool:
         if self.repository.get_pending(deployment.id, "optimize_cost"):
+            return False
+        if self.repository.get_recently_resolved(deployment.id, "optimize_cost", cooldown_since):
             return False
 
         project_id = deployment.microservice.project_id

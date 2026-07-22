@@ -1,0 +1,34 @@
+# Off by default (values.yaml backend.vpa.enabled=false) - see that file's
+# comment for why: the VerticalPodAutoscaler CRD/controller isn't part of
+# vanilla Kubernetes, unlike the HPA in backend-hpa.yaml.
+#
+# updateMode is deliberately "Off" (recommendation-only) rather than "Auto" -
+# see kubernetes/base/backend-vpa.yaml's header comment: an "Auto" VPA
+# fighting the HPA above over the same cpu/memory metric on the same
+# Deployment is an explicitly documented anti-pattern.
+{{- if .Values.backend.vpa.enabled }}
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: backend-vpa
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: backend
+        minAllowed:
+          cpu: {{ .Values.backend.vpa.minAllowedCPU | quote }}
+          memory: {{ .Values.backend.vpa.minAllowedMemory | quote }}
+        maxAllowed:
+          cpu: {{ .Values.backend.vpa.maxAllowedCPU | quote }}
+          memory: {{ .Values.backend.vpa.maxAllowedMemory | quote }}
+        controlledResources: ["cpu", "memory"]
+{{- end }}

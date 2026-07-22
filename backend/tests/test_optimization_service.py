@@ -2,7 +2,7 @@
 through the HTTP API) since it's triggered by the scheduler/POST
 /optimization/evaluate, not by a request body.
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -200,3 +200,74 @@ def test_deployment_with_no_resource_usage_history_is_skipped(db_session, demo_p
     summary = OptimizationService(db_session).evaluate_all()
 
     assert summary["recommendations_created"] == 0
+
+
+def test_dismissed_recommendation_is_not_recreated_within_cooldown(
+    db_session, demo_project_and_deployment
+):
+    _, deployment = demo_project_and_deployment
+    _add_usage(db_session, deployment.id, cpu=90.0, memory=500.0, hour=10)
+    OptimizationService(db_session).evaluate_all()
+
+    rec = (
+        db_session.query(OptimizationRecommendation)
+        .filter(
+            OptimizationRecommendation.deployment_id == deployment.id,
+            OptimizationRecommendation.recommendation_type == "increase_pods",
+        )
+        .one()
+    )
+    rec.status = "dismissed"
+    db_session.commit()  # updated_at becomes "now" via onupdate
+
+    # Same triggering condition still present - without a cooldown this
+    # would be recreated immediately, defeating the point of dismissing it.
+    _add_usage(db_session, deployment.id, cpu=91.0, memory=500.0, hour=11)
+    summary = OptimizationService(db_session).evaluate_all()
+
+    still_none_pending = (
+        db_session.query(OptimizationRecommendation)
+        .filter(
+            OptimizationRecommendation.deployment_id == deployment.id,
+            OptimizationRecommendation.recommendation_type == "increase_pods",
+            OptimizationRecommendation.status == "pending",
+        )
+        .all()
+    )
+    assert still_none_pending == []
+    assert summary["recommendations_created"] == 0
+
+
+def test_recommendation_is_recreated_once_cooldown_expires(db_session, demo_project_and_deployment):
+    _, deployment = demo_project_and_deployment
+    _add_usage(db_session, deployment.id, cpu=90.0, memory=500.0, hour=10)
+    OptimizationService(db_session).evaluate_all()
+
+    rec = (
+        db_session.query(OptimizationRecommendation)
+        .filter(
+            OptimizationRecommendation.deployment_id == deployment.id,
+            OptimizationRecommendation.recommendation_type == "increase_pods",
+        )
+        .one()
+    )
+    rec.status = "dismissed"
+    rec.updated_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+        minutes=OptimizationService(db_session).settings.OPTIMIZATION_RECOMMENDATION_COOLDOWN_MINUTES + 5
+    )
+    db_session.commit()
+
+    _add_usage(db_session, deployment.id, cpu=91.0, memory=500.0, hour=11)
+    summary = OptimizationService(db_session).evaluate_all()
+
+    pending = (
+        db_session.query(OptimizationRecommendation)
+        .filter(
+            OptimizationRecommendation.deployment_id == deployment.id,
+            OptimizationRecommendation.recommendation_type == "increase_pods",
+            OptimizationRecommendation.status == "pending",
+        )
+        .all()
+    )
+    assert len(pending) == 1
+    assert summary["recommendations_created"] >= 1

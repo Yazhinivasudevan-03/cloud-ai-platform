@@ -1,0 +1,43 @@
+# NOT included in kustomization.yaml's resources list, deliberately - unlike
+# the HorizontalPodAutoscaler (backend-hpa.yaml), VerticalPodAutoscaler is
+# not a built-in Kubernetes API: it requires the VPA controller/CRDs
+# (https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler)
+# to be installed in the cluster first. Bundling this into the default
+# `kubectl apply -k` would fail outright with an "unknown kind" error on any
+# cluster that doesn't have it installed - including the Docker Desktop
+# cluster docs/PHASE_8.md verified this project's manifests against, which
+# does not ship the VPA controller. Apply explicitly, and only after
+# installing the VPA controller:
+#   kubectl apply -f kubernetes/base/backend-vpa.yaml
+#
+# updateMode is deliberately "Off" (recommendation-only) rather than "Auto":
+# Auto mode evicts and recreates pods to apply new resource requests, which
+# would fight with backend-hpa.yaml's horizontal scaling on the same
+# Deployment - running both an HPA and an "Auto" VPA on cpu/memory targeting
+# the same metric is an explicitly documented anti-pattern. "Off" gives the
+# same vertical-sizing recommendations (visible via `kubectl describe vpa
+# backend-vpa`) without ever taking scaling action itself, so it never
+# collides with the HPA already handling horizontal scaling for this
+# Deployment.
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: backend-vpa
+  namespace: cloud-ai-platform
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: backend
+        minAllowed:
+          cpu: 100m
+          memory: 256Mi
+        maxAllowed:
+          cpu: 1
+          memory: 1Gi
+        controlledResources: ["cpu", "memory"]

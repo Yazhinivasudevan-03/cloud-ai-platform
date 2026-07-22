@@ -16,6 +16,7 @@ prometheus-fastapi-instrumentator==8.0.2
 apscheduler==3.10.4
 httpx==0.28.1
 boto3==1.43.51
+tenacity==9.0.0
 
 # Testing
 pytest==9.1.1
