@@ -28,7 +28,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 | 16 | Per-account monitoring as the primary view (dedicated page per account with its own usage + alerts, trimmed navigation, verified at scale) | **Complete** - see [`docs/PHASE_16.md`](docs/PHASE_16.md) |
 | 17 | Reliability polish (VPA manifest, retry/backoff on external calls, recommendation cooldown + safety limits) | **Complete** - see [`docs/PHASE_17.md`](docs/PHASE_17.md) |
 | 18 | Production hardening: DB backup CronJob, self-signed TLS on Ingress, real audit logging, broadened rate limiting, NetworkPolicy, ML retraining schedule, LSTM-forecast-informed optimization | **Complete** - see [`docs/PHASE_18.md`](docs/PHASE_18.md) |
-| 19 | Production hardening continued: real AWS Cost Explorer billing sync (moto-tested, no live AWS account available - disclosed) | **In progress** - see [`docs/PHASE_19.md`](docs/PHASE_19.md) |
+| 19 | Production hardening continued: real AWS Cost Explorer billing sync (moto-tested, no live AWS account available - disclosed); CD pipeline (`helm upgrade`, built and documented but disabled pending a real cluster's `KUBE_CONFIG`) | **In progress** - see [`docs/PHASE_19.md`](docs/PHASE_19.md) |
 
 ## Repository layout
 

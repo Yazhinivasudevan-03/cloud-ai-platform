@@ -1,0 +1,101 @@
+name: CD Deploy
+
+# Deploys the images docker-build.yml just built/pushed to GHCR onto a
+# real Kubernetes cluster via `helm upgrade`, using this project's own
+# chart (kubernetes/helm/cloud-ai-platform) - the CD step Phase 9
+# deliberately left out (see docs/PHASE_9.md §6, "No deployment step"),
+# since auto-deploying to a machine-local Docker Desktop cluster would not
+# generalize to any real reader of this dissertation.
+#
+# This workflow is genuinely wired up, not a stub - but it is disabled by
+# default: the `deploy` job's `if:` only evaluates true once a KUBE_CONFIG
+# repository secret exists, and no such secret is configured in this
+# environment. That is a deliberate choice (see docs/PHASE_19.md, item
+# 10): this session has no real Kubernetes cluster of its own to deploy
+# to, and manufacturing fake credentials just to make this job "run
+# green" would prove nothing and would risk looking like a working
+# deployment when it is not. A maintainer with a real cluster can activate
+# this with no code changes at all:
+#
+#   1. Get a kubeconfig for the target cluster with the right context
+#      already selected (`kubectl config use-context ...`).
+#   2. base64-encode it: `cat ~/.kube/config | base64 -w0` (Linux) or
+#      `[Convert]::ToBase64String([IO.File]::ReadAllBytes("$HOME/.kube/config"))` (PowerShell).
+#   3. Add it as a repository secret named KUBE_CONFIG (Settings > Secrets
+#      and variables > Actions > New repository secret).
+#   4. Make the three GHCR packages public (Phase 9 §6 - they default to
+#      private even in a public repo), or add an imagePullSecret to the
+#      chart - this workflow does not configure registry auth on the
+#      cluster side.
+#
+# Once KUBE_CONFIG exists, every successful push-triggered Docker Build on
+# main (or a manual "Run workflow" dispatch) deploys automatically.
+on:
+  workflow_run:
+    workflows: ["Docker Build"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Stays permanently skipped until a maintainer adds the KUBE_CONFIG
+    # secret described above - see the header comment for why that secret
+    # does not exist in this environment.
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') &&
+        secrets.KUBE_CONFIG != ''
+      }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Write kubeconfig from KUBE_CONFIG secret
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+
+      - name: Compute lowercase image owner
+        # Same GHCR-requires-lowercase constraint docker-build.yml already
+        # works around - kept consistent with that workflow's own fix.
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+        env:
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+
+      - name: Determine the commit SHA to deploy
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "DEPLOY_SHA=${{ github.sha }}" >> "$GITHUB_ENV"
+          else
+            echo "DEPLOY_SHA=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Helm upgrade --install
+        run: |
+          helm upgrade --install cloud-ai-platform kubernetes/helm/cloud-ai-platform \
+            --namespace cloud-ai-platform --create-namespace \
+            --set backend.image.repository=${{ env.REGISTRY }}/${OWNER_LC}/cloud-ai-platform-backend \
+            --set backend.image.tag=${DEPLOY_SHA} \
+            --set backend.image.pullPolicy=IfNotPresent \
+            --set frontend.image.repository=${{ env.REGISTRY }}/${OWNER_LC}/cloud-ai-platform-frontend \
+            --set frontend.image.tag=${DEPLOY_SHA} \
+            --set frontend.image.pullPolicy=IfNotPresent \
+            --set mlModels.image.repository=${{ env.REGISTRY }}/${OWNER_LC}/cloud-ai-platform-ml-models \
+            --set mlModels.image.tag=${DEPLOY_SHA} \
+            --set mlModels.image.pullPolicy=IfNotPresent \
+            --wait --timeout 5m
+        env:
+          REGISTRY: ghcr.io
+
+      - name: Verify rollout
+        run: kubectl rollout status deployment/cloud-ai-platform-backend -n cloud-ai-platform --timeout=120s

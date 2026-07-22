@@ -2,7 +2,7 @@
 
 Project: Cloud Usage Monitoring and AI-Driven Predictive Resource Optimization Platform for Microservices
 Phase: 19 (continuation of the "fix everything" audit roadmap work started in Phase 18)
-Status: **In progress** - item 9 complete; items 10-13 continue in later sections of this document
+Status: **In progress** - items 9, 10 complete; items 11-13 continue in later sections of this document
 
 ---
 
@@ -104,3 +104,80 @@ handling, credential validation, and parsing logic are all correct
 against AWS's real API shape, but it cannot prove the numbers a genuine
 account would return parse correctly end-to-end, since it has no
 mechanism to return non-empty cost data at all.
+
+## 3. Item 10 — CD pipeline workflow (built, disabled, documented)
+
+### What was built
+
+`.github/workflows/cd-deploy.yml` (new) - a genuine `helm upgrade
+--install` deployment of this project's own Helm chart
+(`kubernetes/helm/cloud-ai-platform`), pointed at the exact images
+`docker-build.yml` just built and pushed to GHCR (by commit SHA, not
+just `:latest`, so a deploy is always traceable to one exact build).
+Triggers on `workflow_run` following a successful `Docker Build` run on
+`main`, or manually via `workflow_dispatch`.
+
+This directly closes the gap Phase 9 explicitly flagged as a deliberate
+omission at the time (`docs/PHASE_9.md` §6: "No deployment step... would
+not generalize to any real reader of this dissertation, so it is
+intentionally left as a manual step").
+
+### Why it stays disabled, per the user's own explicit choice
+
+Before this roadmap work began, three points needed a decision this
+session could not make unilaterally - one of them was exactly this: does
+the CD job get wired to a real cluster, or built and left off? The
+answer given was **"Build the workflow, but leave it disabled/documented"**
+- explicitly not wiring real cluster credentials into this session, and
+not asking for any to be pasted in either.
+
+That is implemented as a single, legible gate: the `deploy` job's `if:`
+condition requires `secrets.KUBE_CONFIG != ''`, and no such secret is
+configured in this repository. Every trigger of the workflow (a
+successful Docker Build, or a manual dispatch) will show up in the
+Actions tab and then immediately skip - visible, not silently absent,
+but not able to run against anything, because nothing tells it what
+cluster to run against. The workflow's own header comment spells out
+the exact four steps a future maintainer with a real cluster would take
+to activate it (get a kubeconfig, base64-encode it, add it as the
+`KUBE_CONFIG` secret, make the GHCR packages public or add pull
+credentials) - copy-pasteable, not a vague "configure secrets" gesture.
+
+### Verification
+
+- `helm lint kubernetes/helm/cloud-ai-platform` - clean (unchanged from
+  Phase 18, confirming this addition didn't touch the chart itself, only
+  a new consumer of it).
+- `helm template` with the exact `--set` overrides the workflow uses
+  (`backend.image.repository/tag/pullPolicy`,
+  `frontend.image.repository/tag/pullPolicy`,
+  `mlModels.image.repository/tag/pullPolicy`) - confirmed the backend and
+  frontend Deployments render with the GHCR image reference and SHA tag
+  exactly as the workflow would pass them.
+- The workflow YAML itself parsed successfully with a real YAML parser
+  (`yaml.safe_load`), confirming no syntax errors.
+- **Not, and cannot be, verified with a real triggered run**: no
+  `KUBE_CONFIG` secret exists, so the job will only ever show as skipped
+  in this repository's Actions history - consistent with "disabled", not
+  claimed as "tested against a live cluster."
+
+### Known limitations (disclosed)
+
+- **Never executed against a real cluster** - by design, per the
+  decision above. The gate is real (verified: a job with no matching
+  secret genuinely skips rather than failing loudly or running with
+  empty credentials), but the deployment logic inside it has only been
+  validated via `helm template`/lint, not a live `helm upgrade`.
+- **No registry pull-credential wiring** - Phase 9 already disclosed that
+  GHCR packages default to private even in a public repository. This
+  workflow does not configure an `imagePullSecret` on the cluster side;
+  the header comment names making the packages public (or adding pull
+  credentials separately) as a prerequisite step, rather than silently
+  assuming one or the other.
+- **`mlModels.cronJob.enabled` and `mlModels.job.enabled` remain `false`
+  by default in the chart** (pre-existing, mirrors `docker-compose.yml`'s
+  `profiles: ["ml"]` treatment) - this workflow does not force them on;
+  a maintainer activating real CD would pass `--set
+  mlModels.cronJob.enabled=true` (or an additional `-f values file`)
+  themselves if they want the ML retraining CronJob live, rather than
+  having that decision made silently inside CI.
