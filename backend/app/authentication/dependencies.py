@@ -1,5 +1,5 @@
 """FastAPI dependencies for authentication and role-based access control (RBAC)."""
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -16,9 +16,17 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/auth/lo
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+    request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ) -> User:
-    """Resolve the authenticated User from a Bearer access token."""
+    """Resolve the authenticated User from a Bearer access token.
+
+    Also stashes the resolved user on `request.state.current_user` - this
+    runs as a FastAPI dependency (inside route handling), but
+    `AuditLogMiddleware` wraps the whole request and reads this same
+    `request.state` back out after `call_next()` returns, since state set
+    during route handling is visible on the same Request object the
+    middleware already holds.
+    """
     payload = decode_token(token, TokenType.ACCESS)
     username: str | None = payload.get("sub")
     if username is None:
@@ -27,6 +35,7 @@ def get_current_user(
     user = UserRepository(db).get_by_username(username)
     if user is None:
         raise UnauthorizedError("User not found", code="USER_NOT_FOUND")
+    request.state.current_user = user
     return user
 
 

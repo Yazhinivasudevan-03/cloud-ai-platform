@@ -13,6 +13,19 @@ class PredictionRepository(BaseRepository[Prediction]):
     def __init__(self, db: Session):
         super().__init__(db, Prediction)
 
+    def get_latest_for_metric(self, deployment_id: int, metric_type: str) -> Prediction | None:
+        """Most recent LSTM forecast for one metric - used to make resource
+        optimization recommendations prediction-informed (see
+        app/services/optimization_service.py), not just reactive to past
+        actuals."""
+        stmt = (
+            select(Prediction)
+            .where(Prediction.deployment_id == deployment_id, Prediction.metric_type == metric_type)
+            .order_by(Prediction.generated_at.desc())
+            .limit(1)
+        )
+        return self.db.scalars(stmt).first()
+
     def search(
         self,
         deployment_id: int,

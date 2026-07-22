@@ -1,0 +1,16 @@
+# Separate from mysql-pvc.yaml deliberately: backup dumps live on their own
+# volume so a full disk from accumulating dumps can never take down the
+# live MySQL data directory, and so this PVC could be backed by a
+# different (e.g. off-node/cheaper) StorageClass in a real deployment
+# without touching the live database's own storage.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-backup-pvc
+  namespace: cloud-ai-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

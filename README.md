@@ -27,6 +27,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 | 15 | Connect cloud accounts (AWS/Azure/GCP/Other) directly from the Dashboard | **Complete** - see [`docs/PHASE_15.md`](docs/PHASE_15.md) |
 | 16 | Per-account monitoring as the primary view (dedicated page per account with its own usage + alerts, trimmed navigation, verified at scale) | **Complete** - see [`docs/PHASE_16.md`](docs/PHASE_16.md) |
 | 17 | Reliability polish (VPA manifest, retry/backoff on external calls, recommendation cooldown + safety limits) | **Complete** - see [`docs/PHASE_17.md`](docs/PHASE_17.md) |
+| 18 | Production hardening: DB backup CronJob, self-signed TLS on Ingress, real audit logging, broadened rate limiting, NetworkPolicy, ML retraining schedule, LSTM-forecast-informed optimization | **Complete** - see [`docs/PHASE_18.md`](docs/PHASE_18.md) |
 
 ## Repository layout
 

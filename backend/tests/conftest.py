@@ -14,6 +14,7 @@ os.environ["MYSQL_DATABASE"] = "cloud_ai_platform_test"
 os.environ["AUTH_MYSQL_DATABASE"] = "cloud_ai_auth_test"
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -75,7 +76,14 @@ def db_session():
 
 @pytest.fixture()
 def client(db_session):
-    def _override_get_db():
+    def _override_get_db(request: Request):
+        # Stash the same shared test session AuditLogMiddleware reuses, so
+        # its writes land in the same never-committed test transaction as
+        # everything else in the test, rather than a second connection
+        # deadlocking against locks that transaction is still holding - see
+        # app/database/session.py's get_db() for the equivalent production
+        # behavior.
+        request.state.db_session = db_session
         yield db_session
 
     app.dependency_overrides[get_db] = _override_get_db

@@ -1,0 +1,17 @@
+# See kubernetes/base/mysql-backup-pvc.yaml's header comment for why this
+# is a separate PVC from the live MySQL data volume.
+{{- if .Values.mysql.backup.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-backup-pvc
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.mysql.backup.storage }}
+{{- end }}

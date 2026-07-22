@@ -1,0 +1,32 @@
+# Off by default (values.yaml ingress.tls.enabled=false) - requires
+# cert-manager installed in the cluster first; see ingress.yaml's own
+# comment for why. A self-signed issuer needs no external ACME
+# challenge/public domain, unlike Let's Encrypt, so it works in any
+# cluster (including a local Docker Desktop one) purely from having the
+# cert-manager controller installed - genuinely working TLS, just not
+# browser-trusted without your own real domain and a real issuer.
+{{- if .Values.ingress.tls.enabled }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: cloud-ai-platform-selfsigned
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cloud-ai-platform-tls
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.ingress.tls.secretName }}
+  dnsNames:
+    - {{ .Values.ingress.host }}
+  issuerRef:
+    name: cloud-ai-platform-selfsigned
+    kind: ClusterIssuer
+{{- end }}

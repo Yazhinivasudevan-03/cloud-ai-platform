@@ -1,5 +1,12 @@
 namespace: cloud-ai-platform
 
+# Off by default - Docker Desktop Kubernetes' default CNI does not
+# reliably enforce NetworkPolicy at all, so enabling this without a
+# NetworkPolicy-enforcing CNI (Calico, Cilium, etc.) installed would look
+# secured without being secured. See templates/network-policies.yaml.
+networkPolicy:
+  enabled: false
+
 # --- Application images -----------------------------------------------
 # Built locally (docker build) and referenced with pullPolicy: Never by
 # default, since Docker Desktop Kubernetes shares the Docker Engine's image
@@ -48,11 +55,27 @@ mysql:
   resources:
     requests: { cpu: 250m, memory: 512Mi }
     limits: { cpu: "1", memory: 1Gi }
+  backup:
+    enabled: true
+    storage: 5Gi
+    schedule: "0 2 * * *" # daily at 02:00
+    retentionDays: 14
 
 ingress:
   enabled: true
   className: nginx
   host: cloud-ai-platform.local
+  # Off by default - requires cert-manager (https://cert-manager.io) to be
+  # installed in the cluster first, same reasoning as backend.vpa.enabled:
+  # a ClusterIssuer/Certificate are CRDs, not built-in Kubernetes APIs, so
+  # enabling this on a cluster without cert-manager installed fails with an
+  # "unknown kind" error. Uses cert-manager's "selfsigned" issuer - a real,
+  # working TLS certificate, just not one a browser will trust by default,
+  # since no real public domain is available to obtain a trusted cert for
+  # cloud-ai-platform.local.
+  tls:
+    enabled: false
+    secretName: cloud-ai-platform-tls
 
 # --- Config (non-secret) ------------------------------------------------
 config:
@@ -121,4 +144,3 @@ mlModels:
   cronJob:
     enabled: false
     schedule: "0 3 * * *"
-    deploymentId: 1

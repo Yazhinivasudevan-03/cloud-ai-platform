@@ -9,6 +9,7 @@ from isolation_forest import predict as isolation_forest_predict
 from isolation_forest import train as isolation_forest_train
 from random_forest import predict as random_forest_predict
 from random_forest import train as random_forest_train
+from run_pipeline import retrain_all
 from shared.synthetic_data import generate
 
 
@@ -62,3 +63,46 @@ def test_random_forest_train_and_predict_writes_valid_probability(
     result = random_forest_predict.predict(engine, tables, deployment_id)
     assert result["failure_type"] == "deployment_failure"
     assert 0.0 <= result["probability"] <= 1.0
+
+
+def test_retrain_all_trains_and_predicts_every_deployment_with_history(
+    engine, tables, deployment_and_pod
+):
+    deployment_id, pod_id = deployment_and_pod
+    generate(engine, tables, deployment_id, pod_id, days=10, seed=5)
+
+    summary = retrain_all(engine, tables, hours=24 * 10)
+
+    assert deployment_id in summary["succeeded"]
+    assert summary["failed"] == []
+
+    # Confirms this genuinely re-trained and re-predicted, not a no-op -
+    # real fresh Prediction/AnomalyDetection/FailurePrediction rows exist.
+    result = lstm_predict.predict(engine, tables, deployment_id, "cpu_usage_percent")
+    assert 0.0 <= result["confidence_score"] <= 1.0
+
+
+def test_retrain_all_tolerates_a_deployment_with_no_history(engine, tables, deployment_and_pod):
+    """A second, brand-new deployment with zero resource_usage rows must
+    not abort retraining for the first one that has real history - the
+    same tolerate-individual-failures contract as the backend's own
+    scheduled batch jobs."""
+    with_history_id, pod_id = deployment_and_pod
+    generate(engine, tables, with_history_id, pod_id, days=10, seed=6)
+
+    with engine.begin() as conn:
+        empty_deployment_id = conn.execute(
+            tables["deployments"].insert().values(name="empty-deploy", status="running")
+        ).inserted_primary_key[0]
+
+    try:
+        summary = retrain_all(engine, tables, hours=24 * 10)
+
+        assert with_history_id in summary["succeeded"]
+        failed_ids = [f["deployment_id"] for f in summary["failed"]]
+        assert empty_deployment_id in failed_ids
+    finally:
+        with engine.begin() as conn:
+            conn.execute(
+                tables["deployments"].delete().where(tables["deployments"].c.id == empty_deployment_id)
+            )

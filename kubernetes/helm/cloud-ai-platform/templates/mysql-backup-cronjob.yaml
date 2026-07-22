@@ -1,0 +1,65 @@
+# See kubernetes/base/mysql-backup-cronjob.yaml's header comment for the
+# full rationale (single-transaction dump of both databases, retention via
+# find -mtime, why mysqldump's own root credentials are reused).
+{{- if .Values.mysql.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mysql-backup
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "cloud-ai-platform.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.mysql.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: mysql-backup # referenced by network-policies.yaml to allow this Job's pods into mysql
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: mysqldump
+              image: {{ .Values.mysql.image }}
+              env:
+                - name: MYSQL_ROOT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: backend-secret
+                      key: MYSQL_ROOT_PASSWORD
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  STAMP=$(date +%Y%m%d-%H%M%S)
+                  DEST=/backup/cloud-ai-platform-${STAMP}.sql.gz
+                  echo "Dumping cloud_ai_platform + cloud_ai_auth to ${DEST}"
+                  mysqldump -h mysql -u root -p"${MYSQL_ROOT_PASSWORD}" \
+                    --single-transaction --routines --triggers \
+                    --databases cloud_ai_platform cloud_ai_auth \
+                    | gzip > "${DEST}"
+                  echo "Wrote $(du -h "${DEST}" | cut -f1)"
+                  echo "Pruning dumps older than {{ .Values.mysql.backup.retentionDays }} days"
+                  find /backup -name 'cloud-ai-platform-*.sql.gz' -mtime +{{ .Values.mysql.backup.retentionDays }} -delete
+                  ls -la /backup
+              volumeMounts:
+                - name: backup-storage
+                  mountPath: /backup
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          volumes:
+            - name: backup-storage
+              persistentVolumeClaim:
+                claimName: mysql-backup-pvc
+{{- end }}

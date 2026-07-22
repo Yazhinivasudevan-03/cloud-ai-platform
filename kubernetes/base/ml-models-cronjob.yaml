@@ -1,12 +1,15 @@
-# Periodic re-scoring: assumes ml-models-job.yaml has already trained models
-# for this deployment at least once (train writes to the same PVC this
-# mounts), and just re-runs `predict` on a schedule so predictions/anomaly
-# detections/failure predictions stay fresh as new resource_usage data
-# arrives - the production pattern a one-off Job can't provide by itself.
+# Genuine scheduled retraining, not just re-prediction against a stale
+# model - addresses a real gap the technical audit found: this job
+# previously only ever re-ran `predict` for a single hardcoded
+# --deployment-id, never retraining, and never touching any other
+# deployment. `retrain-all` (run_pipeline.py) retrains + predicts all 3
+# models for every deployment with enough resource_usage history,
+# tolerating individual failures the same way the backend's own
+# scheduled batch jobs do (AlertEvaluationService.evaluate_all(), etc.).
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: ml-models-predict
+  name: ml-models-retrain
   namespace: cloud-ai-platform
 spec:
   schedule: "0 3 * * *" # daily at 03:00
@@ -20,10 +23,10 @@ spec:
         spec:
           restartPolicy: Never
           containers:
-            - name: ml-models-predict
+            - name: ml-models-retrain
               image: cloud-ai-platform-ml-models:latest
               imagePullPolicy: Never
-              args: ["predict", "--deployment-id", "1"]
+              args: ["retrain-all"]
               envFrom:
                 - configMapRef:
                     name: backend-config

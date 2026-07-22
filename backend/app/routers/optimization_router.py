@@ -4,12 +4,14 @@ automatically on a schedule - see app/optimization/scheduler.py).
 """
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.authentication.dependencies import get_current_active_user, require_roles
+from app.config.settings import get_settings
 from app.controllers.optimization_controller import OptimizationController
 from app.database.session import get_db
+from app.middleware.rate_limiter import limiter
 from app.models.user import User
 from app.schemas.common import ErrorResponse, PaginatedResponse
 from app.schemas.optimization_recommendation import (
@@ -17,6 +19,8 @@ from app.schemas.optimization_recommendation import (
     OptimizationRecommendationRead,
     OptimizationRecommendationUpdate,
 )
+
+settings = get_settings()
 
 router = APIRouter(tags=["Optimization"])
 
@@ -27,7 +31,8 @@ router = APIRouter(tags=["Optimization"])
     summary="Manually trigger the resource optimization rule engine now (operator/admin)",
     dependencies=[Depends(require_roles("operator", "admin"))],
 )
-def evaluate_optimizations(db: Session = Depends(get_db)) -> OptimizationEvaluationSummary:
+@limiter.limit(settings.RATE_LIMIT_EVALUATION)
+def evaluate_optimizations(request: Request, db: Session = Depends(get_db)) -> OptimizationEvaluationSummary:
     return OptimizationController(db).evaluate()
 
 

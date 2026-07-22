@@ -4,15 +4,19 @@ app/alerts/scheduler.py).
 """
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.authentication.dependencies import get_current_active_user, require_roles
+from app.config.settings import get_settings
 from app.controllers.alert_controller import AlertController
 from app.database.session import get_db
+from app.middleware.rate_limiter import limiter
 from app.models.user import User
 from app.schemas.alert import AlertEvaluationSummary, AlertRead, AlertUpdate
 from app.schemas.common import ErrorResponse, PaginatedResponse
+
+settings = get_settings()
 
 router = APIRouter(tags=["Alerts"])
 
@@ -23,7 +27,8 @@ router = APIRouter(tags=["Alerts"])
     summary="Manually trigger the alert rule engine now (operator/admin)",
     dependencies=[Depends(require_roles("operator", "admin"))],
 )
-def evaluate_alerts(db: Session = Depends(get_db)) -> AlertEvaluationSummary:
+@limiter.limit(settings.RATE_LIMIT_EVALUATION)
+def evaluate_alerts(request: Request, db: Session = Depends(get_db)) -> AlertEvaluationSummary:
     return AlertController(db).evaluate()
 
 

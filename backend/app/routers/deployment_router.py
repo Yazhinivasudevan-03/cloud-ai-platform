@@ -1,16 +1,20 @@
 """Deployment endpoints, nested under a microservice."""
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.authentication.dependencies import get_current_active_user, require_roles
+from app.config.settings import get_settings
 from app.controllers.deployment_controller import DeploymentController
 from app.database.session import get_db
+from app.middleware.rate_limiter import limiter
 from app.models.user import User
 from app.schemas.cloud_sync import CloudSyncResult
 from app.schemas.common import ErrorResponse, PaginatedResponse
 from app.schemas.deployment import DeploymentCreate, DeploymentRead, DeploymentUpdate
+
+settings = get_settings()
 
 router = APIRouter(tags=["Deployments"])
 
@@ -117,7 +121,9 @@ def delete_deployment(deployment_id: int, db: Session = Depends(get_db)) -> None
         },
     },
 )
+@limiter.limit(settings.RATE_LIMIT_CLOUD_SYNC)
 def sync_deployment_cloud_metrics(
+    request: Request,
     deployment_id: int,
     db: Session = Depends(get_db),
     _current_user: User = Depends(get_current_active_user),

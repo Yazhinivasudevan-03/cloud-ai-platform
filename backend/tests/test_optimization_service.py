@@ -10,6 +10,7 @@ from app.models.cloud_cost import CloudCost
 from app.models.deployment import Deployment
 from app.models.microservice import Microservice
 from app.models.optimization_recommendation import OptimizationRecommendation
+from app.models.prediction import Prediction
 from app.models.project import Project
 from app.models.resource_usage import ResourceUsage
 from app.models.user import User
@@ -236,6 +237,76 @@ def test_dismissed_recommendation_is_not_recreated_within_cooldown(
     )
     assert still_none_pending == []
     assert summary["recommendations_created"] == 0
+
+
+def _add_prediction(db_session, deployment_id: int, metric_type: str, predicted_value: float, confidence: float):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    db_session.add(
+        Prediction(
+            deployment_id=deployment_id,
+            model_type="lstm",
+            metric_type=metric_type,
+            predicted_value=predicted_value,
+            confidence_score=confidence,
+            target_timestamp=now + timedelta(hours=1),
+            generated_at=now,
+        )
+    )
+    db_session.commit()
+
+
+def test_confident_high_forecast_triggers_recommendation_actual_alone_would_not(
+    db_session, demo_project_and_deployment
+):
+    """Actual CPU is comfortably mid-band (no threshold crossed on its own),
+    but a confident LSTM forecast predicts a spike above the high
+    threshold - the recommendation must still fire, proving the engine is
+    genuinely forecast-informed, not only reactive to past actuals."""
+    _, deployment = demo_project_and_deployment
+    _add_usage(db_session, deployment.id, cpu=55.0, memory=500.0, hour=10)
+    _add_prediction(db_session, deployment.id, "cpu_usage_percent", predicted_value=95.0, confidence=0.9)
+
+    summary = OptimizationService(db_session).evaluate_all()
+
+    assert summary["recommendations_created"] >= 1
+    rec = (
+        db_session.query(OptimizationRecommendation)
+        .filter(
+            OptimizationRecommendation.deployment_id == deployment.id,
+            OptimizationRecommendation.recommendation_type == "increase_pods",
+        )
+        .one()
+    )
+    assert "LSTM forecasts" in rec.description
+    assert "95.0" in rec.description
+
+
+def test_low_confidence_forecast_is_ignored(db_session, demo_project_and_deployment):
+    _, deployment = demo_project_and_deployment
+    _add_usage(db_session, deployment.id, cpu=55.0, memory=500.0, hour=10)
+    _add_prediction(db_session, deployment.id, "cpu_usage_percent", predicted_value=95.0, confidence=0.2)
+
+    summary = OptimizationService(db_session).evaluate_all()
+
+    assert summary["recommendations_created"] == 0
+
+
+def test_forecast_lower_than_actual_does_not_override_or_annotate(db_session, demo_project_and_deployment):
+    _, deployment = demo_project_and_deployment
+    _add_usage(db_session, deployment.id, cpu=90.0, memory=500.0, hour=10)
+    _add_prediction(db_session, deployment.id, "cpu_usage_percent", predicted_value=50.0, confidence=0.9)
+
+    OptimizationService(db_session).evaluate_all()
+
+    rec = (
+        db_session.query(OptimizationRecommendation)
+        .filter(
+            OptimizationRecommendation.deployment_id == deployment.id,
+            OptimizationRecommendation.recommendation_type == "increase_pods",
+        )
+        .one()
+    )
+    assert "LSTM forecasts" not in rec.description
 
 
 def test_recommendation_is_recreated_once_cooldown_expires(db_session, demo_project_and_deployment):

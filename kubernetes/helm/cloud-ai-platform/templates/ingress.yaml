@@ -11,9 +11,18 @@ metadata:
   labels:
     {{- include "cloud-ai-platform.labels" . | nindent 4 }}
   annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/ssl-redirect: {{ .Values.ingress.tls.enabled | quote }}
+    {{- if .Values.ingress.tls.enabled }}
+    cert-manager.io/cluster-issuer: cloud-ai-platform-selfsigned
+    {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
   rules:
     - host: {{ .Values.ingress.host }}
       http:

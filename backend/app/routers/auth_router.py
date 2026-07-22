@@ -51,7 +51,8 @@ def login(
     summary="Exchange a valid refresh token for a new token pair",
     responses={401: {"model": ErrorResponse, "description": "Invalid or expired refresh token"}},
 )
-def refresh(refresh_token: str, db: Session = Depends(get_db)) -> Token:
+@limiter.limit(settings.RATE_LIMIT_REFRESH)
+def refresh(request: Request, refresh_token: str, db: Session = Depends(get_db)) -> Token:
     return AuthController(db).refresh(refresh_token)
 
 

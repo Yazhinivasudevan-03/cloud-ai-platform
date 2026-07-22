@@ -14,6 +14,8 @@ from __future__ import annotations
 import argparse
 import json
 
+from sqlalchemy import select
+
 from isolation_forest import predict as isolation_forest_predict
 from isolation_forest import train as isolation_forest_train
 from lstm import predict as lstm_predict
@@ -69,6 +71,47 @@ def cmd_all(args: argparse.Namespace) -> None:
     cmd_predict(args)
 
 
+def retrain_all(engine, tables, hours: int = 24) -> dict:
+    """Re-train (all 3 models) then predict for every deployment that has
+    enough resource_usage history, tolerating individual failures - the
+    same "don't let one bad deployment abort the whole batch" pattern as
+    the backend's AlertEvaluationService.evaluate_all()/CloudSyncService.sync_all().
+
+    This is what makes retraining actually *automatic*: previously
+    `run_pipeline.py train`/`predict` only ever ran for one deployment ID a
+    human passed on the command line, with nothing to periodically re-run
+    it as new resource_usage data accumulates - see
+    kubernetes/base/ml-models-cronjob.yaml, now scheduled to call this
+    instead of a single hardcoded --deployment-id.
+    """
+    with engine.connect() as conn:
+        deployment_ids = [row[0] for row in conn.execute(select(tables["deployments"].c.id))]
+
+    succeeded: list[int] = []
+    failed: list[dict] = []
+    for deployment_id in deployment_ids:
+        try:
+            for metric in LSTM_METRICS:
+                lstm_train.train(engine, tables, deployment_id, metric)
+                lstm_predict.predict(engine, tables, deployment_id, metric)
+            isolation_forest_train.train(engine, tables, deployment_id)
+            isolation_forest_predict.predict(engine, tables, deployment_id, hours=hours)
+            random_forest_train.train(engine, tables, deployment_id)
+            random_forest_predict.predict(engine, tables, deployment_id)
+            succeeded.append(deployment_id)
+        except Exception as exc:  # noqa: BLE001 - deliberately broad, see docstring above
+            failed.append({"deployment_id": deployment_id, "error": str(exc)})
+
+    return {"deployments_attempted": len(deployment_ids), "succeeded": succeeded, "failed": failed}
+
+
+def cmd_retrain_all(args: argparse.Namespace) -> None:
+    engine = get_engine()
+    tables = reflect_tables(engine)
+    summary = retrain_all(engine, tables, hours=args.hours)
+    print(json.dumps(summary, indent=2, default=str))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Cloud AI Platform - ML pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -96,6 +139,13 @@ def main() -> None:
     all_parser.add_argument("--days", type=int, default=21)
     all_parser.add_argument("--hours", type=int, default=24)
     all_parser.set_defaults(func=cmd_all)
+
+    retrain_all_parser = subparsers.add_parser(
+        "retrain-all",
+        help="Retrain + predict for every deployment with enough history, tolerating individual failures",
+    )
+    retrain_all_parser.add_argument("--hours", type=int, default=24)
+    retrain_all_parser.set_defaults(func=cmd_retrain_all)
 
     args = parser.parse_args()
     args.func(args)

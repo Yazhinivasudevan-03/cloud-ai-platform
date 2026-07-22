@@ -1,12 +1,12 @@
-# Periodic re-scoring, gated behind mlModels.cronJob.enabled (defaults to
-# false) - assumes the one-off Job (or an equivalent manual training run)
-# has already trained models for this deployment at least once. See
-# kubernetes/base/ml-models-cronjob.yaml's header comment.
+# Genuine scheduled retraining, gated behind mlModels.cronJob.enabled
+# (defaults to false) - see kubernetes/base/ml-models-cronjob.yaml's header
+# comment for why this now runs `retrain-all` (every deployment, real
+# retraining) rather than `predict` for one hardcoded deployment ID.
 {{- if .Values.mlModels.cronJob.enabled }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: ml-models-predict
+  name: ml-models-retrain
   namespace: {{ .Values.namespace }}
   labels:
     {{- include "cloud-ai-platform.labels" . | nindent 4 }}
@@ -22,10 +22,10 @@ spec:
         spec:
           restartPolicy: Never
           containers:
-            - name: ml-models-predict
+            - name: ml-models-retrain
               image: "{{ .Values.mlModels.image.repository }}:{{ .Values.mlModels.image.tag }}"
               imagePullPolicy: {{ .Values.mlModels.image.pullPolicy }}
-              args: ["predict", "--deployment-id", {{ .Values.mlModels.cronJob.deploymentId | quote }}]
+              args: ["retrain-all"]
               envFrom:
                 - configMapRef:
                     name: backend-config

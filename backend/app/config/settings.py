@@ -46,9 +46,23 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: str = "http://localhost:3000"
 
-    # Rate limiting
+    # Rate limiting - previously only login/register were throttled at all;
+    # broadened per the technical audit's finding that every other endpoint,
+    # including expensive ones, was completely unthrottled.
     RATE_LIMIT_LOGIN: str = "5/minute"
     RATE_LIMIT_REGISTER: str = "10/hour"
+    RATE_LIMIT_REFRESH: str = "20/minute"
+    # Full batch evaluation across every deployment - expensive, and already
+    # runs automatically on a schedule, so manual triggers don't need to be
+    # frequent.
+    RATE_LIMIT_EVALUATION: str = "10/hour"
+    # Calls a real external cloud provider API (AWS CloudWatch) - throttled
+    # independently of the account/deployment "no restriction on count"
+    # features (Phase 11/12), which limit total resources, not request rate.
+    RATE_LIMIT_CLOUD_SYNC: str = "30/hour"
+    # Resource usage ingestion - generous, since a real monitored deployment
+    # may legitimately post readings often, but still bounded against abuse.
+    RATE_LIMIT_INGESTION: str = "120/minute"
 
     # Alerting
     ALERT_EVALUATION_INTERVAL_MINUTES: int = 5
@@ -87,6 +101,10 @@ class Settings(BaseSettings):
     # recommendation re-created on every evaluation run right after a user
     # dismissed it.
     OPTIMIZATION_RECOMMENDATION_COOLDOWN_MINUTES: int = 60
+    # Below this confidence, a stale/uncertain LSTM forecast is ignored and
+    # the recommendation engine falls back to past actuals only - see
+    # OptimizationService._effective_cpu/_effective_memory.
+    OPTIMIZATION_PREDICTION_CONFIDENCE_THRESHOLD: float = 0.5
 
     # Real-time cloud metrics sync (Phase 12) - periodically pulls real
     # telemetry from each linked deployment's cloud provider account

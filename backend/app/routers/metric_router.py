@@ -8,17 +8,21 @@ unattended monitoring agents, but for now the same JWT-based roles apply.
 """
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.authentication.dependencies import get_current_active_user, require_roles
+from app.config.settings import get_settings
 from app.controllers.metric_controller import MetricController
 from app.controllers.resource_usage_controller import ResourceUsageController
 from app.database.session import get_db
+from app.middleware.rate_limiter import limiter
 from app.models.user import User
 from app.schemas.common import ErrorResponse, PaginatedResponse
 from app.schemas.metric import MetricCreate, MetricRead
 from app.schemas.resource_usage import ResourceUsageCreate, ResourceUsageRead
+
+settings = get_settings()
 
 router = APIRouter(tags=["Metrics"])
 
@@ -34,8 +38,9 @@ router = APIRouter(tags=["Metrics"])
         422: {"model": ErrorResponse, "description": "Pod does not belong to this deployment"},
     },
 )
+@limiter.limit(settings.RATE_LIMIT_INGESTION)
 def ingest_metric(
-    deployment_id: int, payload: MetricCreate, db: Session = Depends(get_db)
+    request: Request, deployment_id: int, payload: MetricCreate, db: Session = Depends(get_db)
 ) -> MetricRead:
     return MetricController(db).ingest(deployment_id, payload)
 
@@ -67,8 +72,9 @@ def list_metrics(
     dependencies=[Depends(require_roles("operator", "admin"))],
     responses={404: {"model": ErrorResponse, "description": "Deployment not found"}},
 )
+@limiter.limit(settings.RATE_LIMIT_INGESTION)
 def ingest_resource_usage(
-    deployment_id: int, payload: ResourceUsageCreate, db: Session = Depends(get_db)
+    request: Request, deployment_id: int, payload: ResourceUsageCreate, db: Session = Depends(get_db)
 ) -> ResourceUsageRead:
     return ResourceUsageController(db).ingest(deployment_id, payload)
 

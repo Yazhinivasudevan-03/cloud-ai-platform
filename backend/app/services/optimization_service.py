@@ -3,6 +3,13 @@ rows, with the same idempotent create/auto-dismiss lifecycle pattern as
 Phase 5's AlertEvaluationService: a pending recommendation is not re-created
 every run while its condition still holds, and is auto-dismissed once the
 condition clears.
+
+Recommendations are also prediction-informed (see `_blend_with_forecast`),
+not purely reactive to past actuals - closing a real gap between this
+platform's own architecture diagram (which shows "AI predicts usage" as an
+input to "recommend resource allocation") and what the code previously did
+(the recommendation engine never looked at the LSTM's own `Prediction`
+table at all).
 """
 from datetime import datetime, timedelta, timezone
 
@@ -20,8 +27,12 @@ from app.repositories.deployment_repository import DeploymentRepository
 from app.repositories.optimization_recommendation_repository import (
     OptimizationRecommendationRepository,
 )
+from app.repositories.prediction_repository import PredictionRepository
 from app.schemas.optimization_recommendation import OptimizationRecommendationStatus
 from app.utils.exceptions import ConflictError, NotFoundError
+
+_CPU_RECOMMENDATION_TYPES = {"increase_pods", "increase_cpu", "scale_deployment", "reduce_pods", "reduce_cpu"}
+_MEMORY_RECOMMENDATION_TYPES = {"increase_memory", "reduce_memory"}
 
 
 class OptimizationService:
@@ -29,6 +40,7 @@ class OptimizationService:
         self.db = db
         self.repository = OptimizationRecommendationRepository(db)
         self.deployment_repository = DeploymentRepository(db)
+        self.prediction_repository = PredictionRepository(db)
         self.settings = get_settings()
 
     def get(self, recommendation_id: int) -> OptimizationRecommendation:
@@ -113,9 +125,14 @@ class OptimizationService:
         avg_cpu = sum(row.cpu_usage_percent for row in window) / len(window)
         avg_memory = sum(row.memory_usage_mb for row in window) / len(window)
 
+        effective_cpu, cpu_note = self._blend_with_forecast(deployment_id, "cpu_usage_percent", avg_cpu)
+        effective_memory, memory_note = self._blend_with_forecast(
+            deployment_id, "memory_usage_mb", avg_memory
+        )
+
         conditions = evaluate_recommendations(
-            avg_cpu_usage_percent=avg_cpu,
-            avg_memory_usage_mb=avg_memory,
+            avg_cpu_usage_percent=effective_cpu,
+            avg_memory_usage_mb=effective_memory,
             memory_limit_mb=deployment.memory_limit_mb,
             replicas=deployment.replicas,
         )
@@ -143,11 +160,18 @@ class OptimizationService:
                 deployment_id, condition.recommendation_type, cooldown_since
             ):
                 continue  # dismissed/applied too recently - within cooldown, don't re-nag
+
+            description = condition.description
+            if condition.recommendation_type in _CPU_RECOMMENDATION_TYPES and cpu_note:
+                description = f"{description} {cpu_note}"
+            elif condition.recommendation_type in _MEMORY_RECOMMENDATION_TYPES and memory_note:
+                description = f"{description} {memory_note}"
+
             self.db.add(
                 OptimizationRecommendation(
                     deployment_id=deployment_id,
                     recommendation_type=condition.recommendation_type,
-                    description=condition.description,
+                    description=description,
                     estimated_savings=None,
                     status="pending",
                 )
@@ -159,6 +183,37 @@ class OptimizationService:
 
         self.db.commit()
         return recommendations_created, recommendations_dismissed
+
+    def _blend_with_forecast(
+        self, deployment_id: int, metric_type: str, actual_value: float
+    ) -> tuple[float, str | None]:
+        """Returns the higher of (recent actual average, latest confident
+        LSTM forecast) for this metric, plus a human-readable note when the
+        forecast is what determined the result - so a recommendation
+        triggered by a predicted future spike (rather than what's actually
+        happening right now) says so plainly, instead of silently reading
+        like a purely reactive one.
+
+        Taking the max (not an average or the forecast alone) means a
+        confident high forecast can both trigger a scale-up recommendation
+        proactively, and prevent a scale-down recommendation from firing
+        right before a predicted spike - both are the correct call for the
+        same reason.
+        """
+        prediction = self.prediction_repository.get_latest_for_metric(deployment_id, metric_type)
+        if (
+            prediction is None
+            or prediction.confidence_score < self.settings.OPTIMIZATION_PREDICTION_CONFIDENCE_THRESHOLD
+            or prediction.predicted_value <= actual_value
+        ):
+            return actual_value, None
+
+        note = (
+            f"(LSTM forecasts {prediction.predicted_value:.1f} for {metric_type} in the next "
+            f"window, confidence {prediction.confidence_score:.0%} - higher than the recent "
+            f"actual average, so this recommendation is forecast-driven.)"
+        )
+        return prediction.predicted_value, note
 
     def _recent_usage_window(self, deployment_id: int) -> list[ResourceUsage]:
         stmt = (

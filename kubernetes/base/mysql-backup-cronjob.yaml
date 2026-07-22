@@ -1,0 +1,75 @@
+# Daily mysqldump of both databases (cloud_ai_platform - application data,
+# and cloud_ai_auth - login credentials, see docs/PHASE_13.md) onto their
+# own PVC (mysql-backup-pvc.yaml). Addresses the audit finding that this
+# platform had zero backup automation - a single MySQL instance with no
+# backup story was the single most severe real-world risk identified.
+#
+# Uses the mysql:8.0 image purely as a mysqldump client (it never starts a
+# server here) against the live `mysql` Service, authenticating as root via
+# the same backend-secret the main Deployment already uses - no new secret
+# needed. --single-transaction takes a consistent InnoDB snapshot without
+# locking tables, so backups never block the live application.
+#
+# Retention: a plain `find -mtime +14 -delete` keeps the last 14 daily
+# dumps and prunes older ones in the same Job, rather than needing a
+# second CronJob or an external lifecycle policy - deliberately simple
+# given this is a single-node dev/dissertation deployment, not backed by
+# object storage with its own lifecycle rules.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mysql-backup
+  namespace: cloud-ai-platform
+spec:
+  schedule: "0 2 * * *" # daily at 02:00
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: mysql-backup # referenced by network-policies.yaml to allow this Job's pods into mysql
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: mysqldump
+              image: mysql:8.0
+              env:
+                - name: MYSQL_ROOT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: backend-secret
+                      key: MYSQL_ROOT_PASSWORD
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  STAMP=$(date +%Y%m%d-%H%M%S)
+                  DEST=/backup/cloud-ai-platform-${STAMP}.sql.gz
+                  echo "Dumping cloud_ai_platform + cloud_ai_auth to ${DEST}"
+                  mysqldump -h mysql -u root -p"${MYSQL_ROOT_PASSWORD}" \
+                    --single-transaction --routines --triggers \
+                    --databases cloud_ai_platform cloud_ai_auth \
+                    | gzip > "${DEST}"
+                  echo "Wrote $(du -h "${DEST}" | cut -f1)"
+                  echo "Pruning dumps older than 14 days"
+                  find /backup -name 'cloud-ai-platform-*.sql.gz' -mtime +14 -delete
+                  ls -la /backup
+              volumeMounts:
+                - name: backup-storage
+                  mountPath: /backup
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          volumes:
+            - name: backup-storage
+              persistentVolumeClaim:
+                claimName: mysql-backup-pvc

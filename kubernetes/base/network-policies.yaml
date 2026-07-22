@@ -1,0 +1,148 @@
+# NOT included in kustomization.yaml's resources list, deliberately -
+# unlike the other opt-in files in this directory (backend-vpa.yaml,
+# ingress-tls*.yaml), this isn't because of a missing CRD: NetworkPolicy is
+# a built-in Kubernetes API. The reason is different and more important to
+# disclose honestly: Docker Desktop Kubernetes' default CNI does not
+# reliably enforce NetworkPolicy at all - applying these would very likely
+# succeed against the API server while having *no actual effect* on
+# traffic, which is worse than not applying them, since it would look
+# secured without being secured. A NetworkPolicy-enforcing CNI (Calico,
+# Cilium, etc.) must be installed first for any of this to do anything;
+# see https://kubernetes.io/docs/concepts/services-networking/network-policies/#prerequisites.
+# Apply explicitly once a NetworkPolicy-enforcing CNI is confirmed installed:
+#   kubectl apply -f kubernetes/base/network-policies.yaml
+#
+# Design: default-deny INGRESS only, not egress. A default-deny including
+# egress was considered and deliberately rejected here - it would also
+# block DNS resolution (kube-dns/CoreDNS) and this platform's own real
+# outbound calls (AWS CloudWatch, SMTP, Slack/Telegram webhooks - see
+# docs/PHASE_12.md, PHASE_17.md) unless every one of those was separately
+# allow-listed, which cannot be verified without a live cluster to test
+# against. Restricting *ingress* still directly addresses the audit
+# finding this responds to ("flat, unrestricted pod-to-pod networking")
+# at meaningfully lower risk of silently breaking real functionality.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: cloud-ai-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  # no ingress rules = deny all by default; every pod below gets its own
+  # explicit allow policy for exactly the traffic it actually needs.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-mysql-ingress
+  namespace: cloud-ai-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: mysql
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: backend
+        - podSelector:
+            matchLabels:
+              app: mysql-backup
+      ports:
+        - protocol: TCP
+          port: 3306
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-ingress
+  namespace: cloud-ai-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+        - podSelector:
+            matchLabels:
+              app: prometheus
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-ingress
+  namespace: cloud-ai-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    # The standard cloud-provider ingress-nginx install (see docs/PHASE_8.md
+    # §7) runs its controller in its own "ingress-nginx" namespace - traffic
+    # from the Ingress reaches the frontend Service via that controller's
+    # pods, not directly from an external IP inside the cluster network.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-ingress
+  namespace: cloud-ai-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: prometheus
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: grafana
+      ports:
+        - protocol: TCP
+          port: 9090
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kube-state-metrics-ingress
+  namespace: cloud-ai-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: kube-state-metrics
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: prometheus
+      ports:
+        - protocol: TCP
+          port: 8080
+# node-exporter has no policy here - it runs with hostNetwork: true
+# (node-exporter-daemonset.yaml), which puts it on the node's own network
+# namespace rather than the pod network NetworkPolicy governs, so a
+# podSelector-based policy would have no effect on it either way.

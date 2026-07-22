@@ -9,6 +9,8 @@ resources:
   - secret-backend.yaml
   - mysql-init-configmap.yaml
   - mysql-pvc.yaml
+  - mysql-backup-pvc.yaml
+  - mysql-backup-cronjob.yaml
   - prometheus-pvc.yaml
   - grafana-pvc.yaml
   - ml-models-pvc.yaml
@@ -41,3 +43,14 @@ resources:
   # Kubernetes (unlike the HPA above) and isn't installed in the Docker
   # Desktop cluster this project verifies against - see that file's own
   # header comment for the explicit apply command.
+  # ingress-tls-clusterissuer.yaml / ingress-tls.yaml are also intentionally
+  # NOT included here - they require cert-manager, likewise not part of
+  # vanilla Kubernetes - see ingress-tls-clusterissuer.yaml's own header
+  # comment for the explicit apply command (they replace the plain-HTTP
+  # ingress.yaml above once cert-manager is installed).
+  # network-policies.yaml is also intentionally NOT included here - for a
+  # different reason than the CRD-based files above: Docker Desktop
+  # Kubernetes' default CNI does not reliably enforce NetworkPolicy at all,
+  # so applying it by default here could look secured without being
+  # secured - see that file's own header comment for the explicit apply
+  # command, once a NetworkPolicy-enforcing CNI is confirmed installed.

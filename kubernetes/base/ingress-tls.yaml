@@ -1,0 +1,31 @@
+# NOT included in kustomization.yaml's resources list, deliberately - see
+# ingress-tls-clusterissuer.yaml's header comment. Apply this AFTER that
+# file (and after ingress.yaml, which it replaces/updates - same resource
+# name) once cert-manager is installed:
+#   kubectl apply -f kubernetes/base/ingress-tls-clusterissuer.yaml
+#   kubectl apply -f kubernetes/base/ingress-tls.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cloud-ai-platform-ingress
+  namespace: cloud-ai-platform
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: cloud-ai-platform-selfsigned
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - cloud-ai-platform.local
+      secretName: cloud-ai-platform-tls
+  rules:
+    - host: cloud-ai-platform.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
