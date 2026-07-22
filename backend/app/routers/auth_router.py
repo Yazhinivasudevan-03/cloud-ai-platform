@@ -11,7 +11,7 @@ from app.middleware.rate_limiter import limiter
 from app.models.user import User
 from app.schemas.common import ErrorResponse
 from app.schemas.token import Token
-from app.schemas.user import UserCreate, UserRead
+from app.schemas.user import UserCreate, UserProfileUpdate, UserRead
 
 settings = get_settings()
 
@@ -63,3 +63,17 @@ def refresh(request: Request, refresh_token: str, db: Session = Depends(get_db))
 )
 def me(current_user: User = Depends(get_current_active_user)) -> UserRead:
     return UserRead.model_validate(current_user)
+
+
+@router.patch(
+    "/me",
+    response_model=UserRead,
+    summary="Update the currently authenticated user's own profile "
+    "(full_name, phone_number - the latter enables the SMS notification channel)",
+)
+def update_me(
+    payload: UserProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> UserRead:
+    return AuthController(db).update_profile(current_user, payload)

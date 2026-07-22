@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     SLACK_WEBHOOK_URL: str = ""
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = ""
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""
 
     # Resource optimization
     OPTIMIZATION_EVALUATION_INTERVAL_MINUTES: int = 60

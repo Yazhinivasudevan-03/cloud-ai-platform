@@ -8,8 +8,9 @@ without duplicating logic.
 """
 from sqlalchemy.orm import Session
 
+from app.models.user import User
 from app.schemas.token import Token
-from app.schemas.user import UserCreate, UserRead
+from app.schemas.user import UserCreate, UserProfileUpdate, UserRead
 from app.services.auth_service import AuthService
 
 
@@ -23,6 +24,10 @@ class AuthController:
 
     def login(self, username: str, password: str) -> Token:
         return self.service.login(username, password)
+
+    def update_profile(self, current_user: User, payload: UserProfileUpdate) -> UserRead:
+        user = self.service.update_profile(current_user, payload)
+        return UserRead.model_validate(user)
 
     def refresh(self, refresh_token: str) -> Token:
         return self.service.refresh(refresh_token)

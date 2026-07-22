@@ -98,6 +98,41 @@ def test_cpu_warning_threshold_creates_alert_and_notifies_admin(
     assert notifications[0].channel == "dashboard"
 
 
+def test_alert_notifies_admin_via_sms_when_twilio_configured_and_phone_number_set(
+    db_session, demo_deployment, admin_user, monkeypatch
+):
+    """Proves the SMS channel (Phase 19) is genuinely wired into the same
+    fan-out every other channel goes through, not just unit-tested in
+    isolation - an admin with a phone_number on file gets a real "sms"
+    Notification row once Twilio is configured, mirroring how the
+    pre-existing "dashboard" channel test above proves the base wiring."""
+    from unittest.mock import MagicMock, patch
+
+    from app.config.settings import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
+    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+    admin_user.phone_number = "+14155552671"
+    db_session.commit()
+
+    _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=65.0)
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    with patch("app.notifications.sms_notifier.httpx.post", return_value=mock_response) as mock_post:
+        AlertEvaluationService(db_session).evaluate_all()
+
+    mock_post.assert_called_once()
+    alert = db_session.query(Alert).filter(Alert.deployment_id == demo_deployment.id).one()
+    channels = {
+        n.channel
+        for n in db_session.query(Notification).filter(Notification.alert_id == alert.id).all()
+    }
+    assert "sms" in channels
+
+
 def test_cpu_saturated_uses_highest_tier(db_session, demo_deployment, admin_user):
     _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=100.0)
 

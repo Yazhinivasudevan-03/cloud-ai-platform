@@ -2,7 +2,7 @@
 
 Project: Cloud Usage Monitoring and AI-Driven Predictive Resource Optimization Platform for Microservices
 Phase: 19 (continuation of the "fix everything" audit roadmap work started in Phase 18)
-Status: **In progress** - items 9, 10 complete; items 11-13 continue in later sections of this document
+Status: **In progress** - items 9, 10, 11 complete; items 12-13 continue in later sections of this document
 
 ---
 
@@ -181,6 +181,76 @@ credentials) - copy-pasteable, not a vague "configure secrets" gesture.
   mlModels.cronJob.enabled=true` (or an additional `-f values file`)
   themselves if they want the ML retraining CronJob live, rather than
   having that decision made silently inside CI.
+
+## 4. Item 11 — SMS notification channel
+
+### What was built
+
+The audit noted that the notification system (Phase 5) had three
+channels (dashboard, email, Slack/Telegram) but no SMS, despite SMS being
+the channel most likely to actually reach an on-call engineer for a
+critical alert.
+
+- **`User.phone_number`** (new column, migration `398cc42a2677`) - E.164
+  format, nullable (not every user needs SMS). Applied to and verified
+  against the real running dev database (`DESCRIBE cloud_ai_auth.users`
+  confirms the column), not just generated and left unapplied.
+- **`PATCH /auth/me`** (new endpoint) - lets a user set their own
+  `full_name`/`phone_number` self-service, validated against a real E.164
+  regex (`^\+?[1-9]\d{1,14}$`). This didn't exist before in any form - a
+  genuinely necessary addition, not scope creep, since without *some* way
+  to set a phone number the new column and channel would be permanently
+  empty and untestable end-to-end. Deliberately excludes
+  username/email/roles, which stay admin-managed exactly as before.
+- **`app/notifications/sms_notifier.py`** (new) - `send_sms()` calls
+  Twilio's REST Messages API directly via `httpx` (Basic Auth with the
+  Account SID/Auth Token, form-encoded `From`/`To`/`Body`), mirroring
+  `slack_notifier.py`/`telegram_notifier.py`'s structure exactly,
+  including reusing the same `@http_retry` decorator and
+  log-and-return-`False` degradation on exhausted retries or missing
+  configuration. Uses `httpx` directly rather than the `twilio` SDK -
+  consistent with how Slack/Telegram are also implemented as plain REST
+  calls, not SDK calls, since Twilio's Messages API is a single
+  authenticated POST with no benefit from an SDK here.
+- **`TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_FROM_NUMBER`** (new
+  settings, all default to empty string - unconfigured by default,
+  exactly like the existing Slack/Telegram settings).
+- **`dispatcher.py`** - SMS is dispatched per-admin (like email, since
+  each admin has their own phone number), not once per alert (unlike
+  Slack/Telegram, which are shared-channel destinations) - a
+  `Notification(channel="sms")` row is recorded for each admin only when
+  delivery actually succeeds, exactly matching how every other channel
+  already records its own delivery outcome.
+
+### Verification
+
+- 6 new unit tests in `tests/test_notifiers.py` (unconfigured, no
+  phone_number on file, successful send with the exact Twilio request
+  shape asserted, retry-then-succeed, retries-exhausted, and
+  non-transient 401 doesn't retry) - the same structure as the existing
+  Slack/email test blocks in the same file.
+- 3 new tests in `tests/test_auth.py` for `PATCH /auth/me` (sets both
+  fields and they read back correctly via a follow-up `GET /auth/me`,
+  rejects a non-E.164 phone number with 422, requires authentication).
+- 1 new integration test in `tests/test_alert_evaluation.py`
+  (`test_alert_notifies_admin_via_sms_when_twilio_configured_and_phone_number_set`) -
+  proves SMS is genuinely wired into the same real alert-evaluation fan-out
+  every other channel goes through (a real CPU-warning alert, with Twilio
+  configured and the admin's `phone_number` set, produces a real `"sms"`
+  `Notification` row and a real, asserted Twilio API call), not just
+  unit-tested in isolation.
+- Full backend suite: **211/211 passing** (201 at the end of item 9's
+  checkpoint + 6 (item 11 unit) + 3 (profile update) + 1 (integration) =
+  211).
+
+### Known limitation (disclosed)
+
+**Never verified against a real Twilio account** - no Twilio credentials
+were available in this environment. All tests mock the `httpx.post` call
+with a realistic Twilio-shaped request/response rather than hitting
+Twilio's real API (unlike AWS CloudWatch/Cost Explorer, Twilio has no
+widely-used local emulator equivalent to moto, so this is disclosed as a
+plain mock rather than an emulator-backed integration test).
 
 ### A real bug, caught by an actual failed run, not by inspection
 

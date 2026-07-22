@@ -13,7 +13,7 @@ from app.models.user import User
 from app.repositories.role_repository import RoleRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.token import Token
-from app.schemas.user import UserCreate
+from app.schemas.user import UserCreate, UserProfileUpdate
 from app.utils.exceptions import ConflictError, UnauthorizedError
 
 DEFAULT_ROLE_NAME = "viewer"
@@ -60,6 +60,15 @@ class AuthService:
             access_token=create_access_token(user.username),
             refresh_token=create_refresh_token(user.username),
         )
+
+    def update_profile(self, current_user: User, payload: UserProfileUpdate) -> User:
+        if payload.full_name is not None:
+            current_user.full_name = payload.full_name
+        if payload.phone_number is not None:
+            current_user.phone_number = payload.phone_number
+        self.db.commit()
+        self.db.refresh(current_user)
+        return current_user
 
     def refresh(self, refresh_token: str) -> Token:
         payload = decode_token(refresh_token, TokenType.REFRESH)

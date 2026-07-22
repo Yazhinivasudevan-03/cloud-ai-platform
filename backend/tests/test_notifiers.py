@@ -15,6 +15,7 @@ import httpx
 from app.config.settings import get_settings
 from app.notifications.email_notifier import send_email
 from app.notifications.slack_notifier import send_slack_message
+from app.notifications.sms_notifier import send_sms
 from app.notifications.telegram_notifier import send_telegram_message
 
 
@@ -105,6 +106,107 @@ def test_send_telegram_message_calls_bot_api_when_configured(monkeypatch):
         json={"chat_id": "999", "text": "hello from the alert engine"},
         timeout=10,
     )
+
+
+def test_send_sms_returns_false_when_unconfigured(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "")
+    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "")
+
+    result = send_sms("+14155552671", "hello")
+
+    assert result is False
+
+
+def test_send_sms_returns_false_when_user_has_no_phone_number(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
+    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+
+    with patch("app.notifications.sms_notifier.httpx.post") as mock_post:
+        result = send_sms(None, "hello")
+
+    assert result is False
+    mock_post.assert_not_called()
+
+
+def test_send_sms_calls_twilio_api_when_configured(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
+    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+
+    with patch("app.notifications.sms_notifier.httpx.post", return_value=mock_response) as mock_post:
+        result = send_sms("+14155552671", "hello from the alert engine")
+
+    assert result is True
+    mock_post.assert_called_once_with(
+        "https://api.twilio.com/2010-04-01/Accounts/ACxxxx/Messages.json",
+        auth=("ACxxxx", "secret"),
+        data={"From": "+15005550006", "To": "+14155552671", "Body": "hello from the alert engine"},
+        timeout=10,
+    )
+
+
+def test_send_sms_retries_on_transient_error_then_succeeds(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
+    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+
+    with patch(
+        "app.notifications.sms_notifier.httpx.post",
+        side_effect=[httpx.ConnectError("connection refused"), mock_response],
+    ) as mock_post:
+        result = send_sms("+14155552671", "hello")
+
+    assert result is True
+    assert mock_post.call_count == 2
+
+
+def test_send_sms_returns_false_after_retries_exhausted(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
+    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+
+    with patch(
+        "app.notifications.sms_notifier.httpx.post",
+        side_effect=httpx.ConnectError("connection refused"),
+    ) as mock_post:
+        result = send_sms("+14155552671", "hello")
+
+    assert result is False
+    assert mock_post.call_count == 3
+
+
+def test_send_sms_does_not_retry_bad_credentials(monkeypatch):
+    """A 401 (bad Account SID/Auth Token) is a config error, not a
+    transient failure - retrying it 3 times would only waste time."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "wrong-token")
+    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+
+    mock_response = MagicMock()
+    mock_response.status_code = 401
+    mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "Unauthorized", request=MagicMock(), response=mock_response
+    )
+
+    with patch("app.notifications.sms_notifier.httpx.post", return_value=mock_response) as mock_post:
+        result = send_sms("+14155552671", "hello")
+
+    assert result is False
+    assert mock_post.call_count == 1
 
 
 # --- Retry/backoff on transient failures ------------------------------------

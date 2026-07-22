@@ -1,12 +1,13 @@
 """Fan-out: given a newly created Alert, notify every admin user.
 
 Dashboard notifications are always recorded (the `Notification` row itself
-*is* the dashboard entry - no external delivery needed). Email is inherently
-per-user (each admin has their own address), so it's attempted once per
-admin. Slack/Telegram are shared-channel destinations, not per-user inboxes,
-so each is attempted exactly once per alert - but a `Notification` row is
-still recorded per admin per successful channel, so every admin's
-notification history reflects that they would have seen it there.
+*is* the dashboard entry - no external delivery needed). Email and SMS are
+inherently per-user (each admin has their own address/phone_number), so
+each is attempted once per admin. Slack/Telegram are shared-channel
+destinations, not per-user inboxes, so each is attempted exactly once per
+alert - but a `Notification` row is still recorded per admin per successful
+channel, so every admin's notification history reflects that they would
+have seen it there.
 """
 from datetime import datetime, timezone
 
@@ -18,6 +19,7 @@ from app.models.notification import Notification
 from app.models.user import Role, User, user_roles
 from app.notifications.email_notifier import send_email
 from app.notifications.slack_notifier import send_slack_message
+from app.notifications.sms_notifier import send_sms
 from app.notifications.telegram_notifier import send_telegram_message
 from app.utils.logger import get_logger
 
@@ -95,6 +97,19 @@ def dispatch(db: Session, alert: Alert) -> int:
                     user_id=user.id,
                     alert_id=alert.id,
                     channel="telegram",
+                    message=alert.message,
+                    is_read=False,
+                    sent_at=now,
+                )
+            )
+            created += 1
+
+        if send_sms(user.phone_number, f"{subject}: {alert.message}"):
+            db.add(
+                Notification(
+                    user_id=user.id,
+                    alert_id=alert.id,
+                    channel="sms",
                     message=alert.message,
                     is_read=False,
                     sent_at=now,

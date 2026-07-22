@@ -57,6 +57,11 @@ class User(TimestampMixin, Base):
     email: Mapped[str] = mapped_column(String(120), nullable=False)
     full_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    phone_number: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        doc="E.164 format (e.g. +14155552671) - required for the sms notification channel (Phase 19).",
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 

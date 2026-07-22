@@ -102,6 +102,49 @@ def test_me_returns_current_user_with_valid_token(client):
     assert response.json()["username"] == "jdoe"
 
 
+def _login(client, username: str, password: str) -> str:
+    return client.post(
+        "/api/v1/auth/login", data={"username": username, "password": password}
+    ).json()["access_token"]
+
+
+def test_update_me_sets_phone_number_and_full_name(client):
+    client.post("/api/v1/auth/register", json=_register_payload(username="phoneuser", email="phoneuser@example.com"))
+    token = _login(client, "phoneuser", "Sup3rSecret!")
+
+    response = client.patch(
+        "/api/v1/auth/me",
+        json={"phone_number": "+14155552671", "full_name": "New Name"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["phone_number"] == "+14155552671"
+    assert body["full_name"] == "New Name"
+
+    me_response = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me_response.json()["phone_number"] == "+14155552671"
+
+
+def test_update_me_rejects_non_e164_phone_number(client):
+    client.post("/api/v1/auth/register", json=_register_payload(username="badphone", email="badphone@example.com"))
+    token = _login(client, "badphone", "Sup3rSecret!")
+
+    response = client.patch(
+        "/api/v1/auth/me",
+        json={"phone_number": "not-a-phone-number"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_me_requires_authentication(client):
+    response = client.patch("/api/v1/auth/me", json={"phone_number": "+14155552671"})
+    assert response.status_code == 401
+
+
 def test_refresh_issues_new_token_pair(client):
     client.post("/api/v1/auth/register", json=_register_payload())
     login_response = client.post(
