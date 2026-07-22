@@ -3,30 +3,29 @@ name: CD Deploy
 # Deploys the images docker-build.yml just built/pushed to GHCR onto a
 # real Kubernetes cluster via `helm upgrade`, using this project's own
 # chart (kubernetes/helm/cloud-ai-platform) - the CD step Phase 9
-# deliberately left out (see docs/PHASE_9.md §6, "No deployment step"),
-# since auto-deploying to a machine-local Docker Desktop cluster would not
-# generalize to any real reader of this dissertation.
+# deliberately left out (see docs/PHASE_9.md section 6, "No deployment
+# step"), since auto-deploying to a machine-local Docker Desktop cluster
+# would not generalize to any real reader of this dissertation.
 #
 # This workflow is genuinely wired up, not a stub - but it is disabled by
-# default: the `deploy` job's `if:` only evaluates true once a KUBE_CONFIG
-# repository secret exists, and no such secret is configured in this
-# environment. That is a deliberate choice (see docs/PHASE_19.md, item
-# 10): this session has no real Kubernetes cluster of its own to deploy
-# to, and manufacturing fake credentials just to make this job "run
-# green" would prove nothing and would risk looking like a working
-# deployment when it is not. A maintainer with a real cluster can activate
-# this with no code changes at all:
+# default: the `deploy` job only runs once a KUBE_CONFIG repository secret
+# exists, and no such secret is configured in this environment. That is a
+# deliberate choice (see docs/PHASE_19.md, item 10): this session has no
+# real Kubernetes cluster of its own to deploy to, and manufacturing fake
+# credentials just to make this job "run green" would prove nothing and
+# would risk looking like a working deployment when it is not. A
+# maintainer with a real cluster can activate this with no code changes:
 #
 #   1. Get a kubeconfig for the target cluster with the right context
-#      already selected (`kubectl config use-context ...`).
-#   2. base64-encode it: `cat ~/.kube/config | base64 -w0` (Linux) or
-#      `[Convert]::ToBase64String([IO.File]::ReadAllBytes("$HOME/.kube/config"))` (PowerShell).
+#      already selected (kubectl config use-context ...).
+#   2. base64-encode it: cat ~/.kube/config | base64 -w0 (Linux) or
+#      [Convert]::ToBase64String([IO.File]::ReadAllBytes("$HOME/.kube/config")) (PowerShell).
 #   3. Add it as a repository secret named KUBE_CONFIG (Settings > Secrets
 #      and variables > Actions > New repository secret).
-#   4. Make the three GHCR packages public (Phase 9 §6 - they default to
-#      private even in a public repo), or add an imagePullSecret to the
-#      chart - this workflow does not configure registry auth on the
-#      cluster side.
+#   4. Make the three GHCR packages public (Phase 9 section 6 - they
+#      default to private even in a public repo), or add an
+#      imagePullSecret to the chart - this workflow does not configure
+#      registry auth on the cluster side.
 #
 # Once KUBE_CONFIG exists, every successful push-triggered Docker Build on
 # main (or a manual "Run workflow" dispatch) deploys automatically.
@@ -38,16 +37,27 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  # Secrets cannot be referenced directly in a job-level `if:` condition -
+  # they are only available inside a job's own steps. This job reads the
+  # secret inside a step (where it's allowed) and publishes only whether
+  # it's set as a plain output, which the deploy job below can then gate
+  # on - the standard, documented pattern for this exact situation.
+  check-secret:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    outputs:
+      has-kube-config: ${{ steps.check.outputs.result }}
+    steps:
+      - id: check
+        run: echo "result=${{ secrets.KUBE_CONFIG != '' }}" >> "$GITHUB_OUTPUT"
+
   deploy:
+    needs: check-secret
     runs-on: ubuntu-latest
     # Stays permanently skipped until a maintainer adds the KUBE_CONFIG
     # secret described above - see the header comment for why that secret
     # does not exist in this environment.
-    if: >-
-      ${{
-        (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') &&
-        secrets.KUBE_CONFIG != ''
-      }}
+    if: needs.check-secret.outputs.has-kube-config == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
