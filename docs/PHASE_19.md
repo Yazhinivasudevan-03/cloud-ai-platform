@@ -181,3 +181,23 @@ credentials) - copy-pasteable, not a vague "configure secrets" gesture.
   mlModels.cronJob.enabled=true` (or an additional `-f values file`)
   themselves if they want the ML retraining CronJob live, rather than
   having that decision made silently inside CI.
+
+### A real bug, caught by an actual failed run, not by inspection
+
+The first push of `cd-deploy.yml` registered with GitHub Actions but
+immediately produced a run that failed in 0 seconds with 0 jobs
+scheduled - and `gh api .../actions/workflows` showed the workflow's own
+`name` falling back to its file path instead of `CD Deploy`, confirming
+GitHub could not parse it as a valid workflow at all, not just that a job
+failed. The cause: the `deploy` job's original `if:` condition referenced
+`secrets.KUBE_CONFIG` directly - `secrets` is not a valid context for a
+job-level `if:`, only inside a job's own steps (`run`, `env`, `with`).
+Fixed by splitting into two jobs: `check-secret` reads the secret inside
+a step (where the `secrets` context is legal) and publishes only a plain
+`'true'`/`'false'` string as a job output; `deploy` then gates on
+`needs.check-secret.outputs.has-kube-config == 'true'` in its own `if:`,
+which only ever needs the `needs` context - the officially documented
+pattern for exactly this situation. Re-pushed and confirmed via
+`gh api .../actions/workflows` that the workflow now registers correctly
+as `CD Deploy` (not a fallback path), proving the fix actually resolved
+the parse failure rather than just moving it.
