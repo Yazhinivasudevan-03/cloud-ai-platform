@@ -2,15 +2,19 @@
 next month's spend for a project."""
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.authentication.dependencies import get_current_active_user, require_roles
+from app.config.settings import get_settings
 from app.controllers.cloud_cost_controller import CloudCostController
 from app.database.session import get_db
+from app.middleware.rate_limiter import limiter
 from app.models.user import User
 from app.schemas.cloud_cost import CloudCostCreate, CloudCostRead, CostForecastRead
 from app.schemas.common import ErrorResponse, PaginatedResponse
+
+settings = get_settings()
 
 router = APIRouter(tags=["Cloud Costs"])
 
@@ -46,6 +50,30 @@ def list_cloud_costs(
     _current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[CloudCostRead]:
     return CloudCostController(db).list(project_id, provider, since, until, page, page_size)
+
+
+@router.post(
+    "/projects/{project_id}/cloud-costs/sync",
+    response_model=list[CloudCostRead],
+    status_code=201,
+    summary="Pull real AWS Cost Explorer billing data for a linked cloud provider "
+    "account into this project (operator/admin)",
+    dependencies=[Depends(require_roles("operator", "admin"))],
+    responses={
+        403: {"model": ErrorResponse, "description": "cloud_provider_account_id belongs to another user"},
+        404: {"model": ErrorResponse, "description": "Project or cloud account not found"},
+        422: {"model": ErrorResponse, "description": "That provider isn't supported yet"},
+    },
+)
+@limiter.limit(settings.RATE_LIMIT_CLOUD_SYNC)
+def sync_project_cloud_costs(
+    request: Request,
+    project_id: int,
+    cloud_provider_account_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> list[CloudCostRead]:
+    return CloudCostController(db).sync_from_aws(project_id, cloud_provider_account_id, current_user.id)
 
 
 @router.get(

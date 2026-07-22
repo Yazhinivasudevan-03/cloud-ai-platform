@@ -111,6 +111,10 @@ class Settings(BaseSettings):
     CLOUD_SYNC_INTERVAL_MINUTES: int = 15
     CLOUD_SYNC_LOOKBACK_MINUTES: int = 15
 
+    # Real AWS Cost Explorer billing sync (Phase 18) - how many complete
+    # past calendar months of spend to pull per sync.
+    CLOUD_COST_SYNC_LOOKBACK_MONTHS: int = 3
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]

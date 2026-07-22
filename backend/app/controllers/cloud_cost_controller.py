@@ -44,3 +44,9 @@ class CloudCostController:
             historical_periods_used=forecast.historical_periods_used,
             trend_slope_per_month=forecast.trend_slope_per_month,
         )
+
+    def sync_from_aws(
+        self, project_id: int, cloud_provider_account_id: int, current_user_id: int
+    ) -> "list[CloudCostRead]":
+        costs = self.service.sync_from_aws(project_id, cloud_provider_account_id, current_user_id)
+        return [CloudCostRead.model_validate(c) for c in costs]
