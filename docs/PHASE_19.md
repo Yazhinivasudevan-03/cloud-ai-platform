@@ -2,7 +2,7 @@
 
 Project: Cloud Usage Monitoring and AI-Driven Predictive Resource Optimization Platform for Microservices
 Phase: 19 (continuation of the "fix everything" audit roadmap work started in Phase 18)
-Status: **In progress** - items 9, 10, 11, 12 complete; item 13 continues in a later section of this document
+Status: **Complete** - all 13 audit roadmap items now done (1-8/3 in Phase 18; 9-13 in this document)
 
 ---
 
@@ -343,6 +343,136 @@ in `src/test/setup.ts` described above. Re-ran: 18/18 passing.
   flow (the auth gate and login form), not every page/component in the
   app. Extending coverage further is straightforward given the pattern
   established here, but was not the audit's ask.
+
+## 6. Item 13 — Structured logging + distributed tracing
+
+### What was built
+
+The audit's Phase 7/final gap analysis flagged "plain-text logging / no
+tracing" - every log line was human-formatted text, and there was no way
+to see how a single request's time was actually spent across the FastAPI
+layer and the database.
+
+- **`app/utils/logger.py`** - rewritten `JsonFormatter` replaces the
+  previous plain-text `logging.Formatter`; every log line is now one JSON
+  object (`timestamp`, `level`, `logger`, `message`, plus `exception` when
+  present) rather than a formatted string. Any caller-supplied structured
+  fields (`logger.info(..., extra={"deployment_id": 42})`) pass through
+  as their own top-level JSON keys rather than being silently dropped -
+  computed generically by diffing against a fresh `LogRecord`'s own
+  `__dict__`, not a hardcoded field list that would silently miss a
+  future addition to Python's own `LogRecord`.
+- **`app/observability/tracing.py`** (new) - `configure_tracing(app,
+  engine)` sets up a real OpenTelemetry `TracerProvider`, instruments the
+  FastAPI app (`FastAPIInstrumentor`) and the SQLAlchemy engine
+  (`SQLAlchemyInstrumentor`) so every HTTP request and every DB query it
+  triggers becomes a real, correlated span. Exports to
+  `ConsoleSpanExporter` (stdout) by default - genuinely inspectable via
+  `docker compose logs backend` with zero external services required -
+  and switches to a real `OTLPSpanExporter` when
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is set (the same env var name the
+  OpenTelemetry SDK itself conventionally reads), so pointing this at a
+  real collector (an OTel Collector, Jaeger, Tempo) needs no code change.
+- **`JsonFormatter` reads the active span's trace/span ID** (via
+  `opentelemetry.trace.get_current_span()`) and adds them as
+  `trace_id`/`span_id` fields on every log line emitted while a request
+  is being traced - the concrete point of doing both pieces of this item
+  together rather than separately: a specific log line can be searched by
+  its exact `trace_id` and matched back to the full distributed trace it
+  was emitted during, in a real log aggregator or just by eye.
+- New settings: `OTEL_ENABLED` (default `true`), `OTEL_SERVICE_NAME`
+  (default `cloud-ai-platform-backend`), `OTEL_EXPORTER_OTLP_ENDPOINT`
+  (default empty - console exporter).
+- `tests/conftest.py` sets `OTEL_ENABLED=false` before the test suite's
+  own `app.main.app` is imported, so the suite's ~200 HTTP requests each
+  don't also print a console span - tracing itself is exercised directly
+  in `tests/test_observability.py` against throwaway FastAPI
+  apps/engines, never the shared test-session `app.main.app` singleton.
+
+### Live-verified, not just unit-tested
+
+Rebuilt and restarted the real `cloud-ai-backend` container and hit
+`GET /health` directly (not through the test suite), then read the
+container's actual stdout via `docker compose logs backend`. The
+structured JSON log line and the OpenTelemetry span it was emitted during
+share the exact same `trace_id`:
+
+```json
+{"timestamp": "2026-07-23T03:45:04+0000", "level": "INFO", "logger": "http", "message": "GET /health -> 200 (4.09ms)", "trace_id": "55b38d54f0f4aeb942281fc1d738dd89", "span_id": "46779d66cee46423"}
+```
+
+```json
+{
+    "name": "GET /health",
+    "context": {"trace_id": "0x55b38d54f0f4aeb942281fc1d738dd89", "span_id": "0x46779d66cee46423", "trace_state": "[]"},
+    "kind": "SpanKind.SERVER",
+    "attributes": {"http.method": "GET", "http.route": "/health", "http.status_code": 200},
+    ...
+}
+```
+
+This is real evidence the log-to-trace correlation works end-to-end
+against the actual running service, not an assumption from reading the
+code.
+
+### A genuine constraint found while wiring this in (disclosed, not hidden)
+
+OpenTelemetry's `trace.set_tracer_provider()` is a process-wide singleton
+- it can only be meaningfully called once; a second call is silently
+ignored by the SDK (the first provider stays authoritative). This meant
+`tests/test_observability.py` could not simply call `configure_tracing()`
+multiple times across separate tests and expect each to install its own
+provider. Worked around by structuring the tests so only **one** test
+lets `configure_tracing()` actually win the global provider slot (and
+verifies real request tracing against it via an in-memory span exporter
+attached afterward - adding a span *processor* to an already-installed
+provider is allowed any number of times, unlike replacing the provider
+itself), while the OTLP-exporter-selection test verifies the exporter
+constructor call directly via mocking instead of relying on the real
+global state.
+
+### Verification
+
+- 7 new tests in `tests/test_observability.py`: 4 for `JsonFormatter`
+  (valid JSON with expected fields, extra-field passthrough, exception
+  traceback inclusion, trace/span ID inclusion when a span is active) and
+  3 for `configure_tracing` (a real request through a genuinely
+  instrumented throwaway FastAPI app produces a real finished span via an
+  in-memory exporter; the OTLP exporter is constructed with the right
+  endpoint when configured; disabled via `OTEL_ENABLED=false` is a
+  verified no-op).
+- Full backend suite: **218/218 passing** (211 at the end of item 12's
+  checkpoint + 7 new).
+- Live-verified against the real running `cloud-ai-backend` container (see
+  above) - not simulated.
+
+### Known limitations (disclosed)
+
+- **Never verified against a real OTLP collector** - no Jaeger/Tempo/OTel
+  Collector instance was available in this environment. The OTLP export
+  path is verified only via a mocked exporter constructor call (proving
+  `configure_tracing` *would* construct and use it correctly), not a real
+  network export to a live collector.
+- **SQLAlchemy instrumentation covers the production `engine` only** -
+  the test suite's own separate test-database engine (`tests/conftest.py`)
+  is never instrumented, since `OTEL_ENABLED=false` during tests skips
+  `configure_tracing()` entirely; this is intentional (see above), not an
+  oversight.
+- **JSON logs are the only format now offered** - there is no
+  human-readable fallback mode. This is a deliberate trade (matching what
+  "structured logging" in the audit's own finding actually calls for),
+  but it does mean a developer reading `docker compose logs backend` by
+  eye during local development sees JSON, not the previously
+  human-formatted line - a real, if minor, developer-experience
+  regression traded for machine-parseability.
+
+## 7. Summary
+
+All 13 items from the technical audit's prioritized roadmap are now
+complete, across Phase 17 (item 14) and Phase 18/19 (items 1-13). See
+each phase's own document for the specific verification evidence,
+disclosed limitations, and (where applicable) real bugs found and fixed
+along the way.
 
 ### A real bug, caught by an actual failed run, not by inspection
 

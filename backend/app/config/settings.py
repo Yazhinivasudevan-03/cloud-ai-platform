@@ -118,6 +118,21 @@ class Settings(BaseSettings):
     # past calendar months of spend to pull per sync.
     CLOUD_COST_SYNC_LOOKBACK_MONTHS: int = 3
 
+    # Structured logging + distributed tracing (Phase 19). Logs are always
+    # emitted as one JSON object per line (see app/utils/logger.py) - there
+    # is no plain-text fallback, since the point is machine-parseable
+    # output a real log aggregator (ELK/Loki/CloudWatch Logs Insights)
+    # can query on fields, not just grep.
+    OTEL_ENABLED: bool = True
+    OTEL_SERVICE_NAME: str = "cloud-ai-platform-backend"
+    # Empty (default): spans export to stdout via ConsoleSpanExporter, so
+    # tracing is genuinely observable (`docker compose logs backend`) with
+    # zero external services required. Set this to a real collector's URL
+    # (e.g. an OTel Collector, Jaeger, Tempo, Grafana Cloud) to switch to a
+    # real OTLP/HTTP export instead - the same env var name the
+    # OpenTelemetry SDK itself conventionally reads.
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = ""
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]

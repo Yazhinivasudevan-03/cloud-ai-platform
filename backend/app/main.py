@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.alerts.scheduler import register_alert_evaluation_job
 from app.config.settings import get_settings
+from app.database.session import engine as db_engine
 from app.integrations.scheduler import register_cloud_sync_job
 from app.middleware.audit_middleware import AuditLogMiddleware
 from app.middleware.error_handler import register_exception_handlers
@@ -17,6 +18,7 @@ from app.middleware.logging_middleware import RequestLoggingMiddleware
 from app.middleware.rate_limiter import register_rate_limiter
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.monitoring.prometheus_metrics import register_prometheus_metrics
+from app.observability.tracing import configure_tracing
 from app.optimization.scheduler import register_optimization_evaluation_job
 from app.routers import (
     alert_router,
@@ -70,6 +72,7 @@ def create_app() -> FastAPI:
     register_rate_limiter(app)
     register_exception_handlers(app)
     register_prometheus_metrics(app)
+    configure_tracing(app, db_engine)
 
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(AuditLogMiddleware)

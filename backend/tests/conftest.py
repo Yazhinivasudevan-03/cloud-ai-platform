@@ -12,6 +12,10 @@ import os
 # login-credentials database (see docs/PHASE_13.md) get their own test schema.
 os.environ["MYSQL_DATABASE"] = "cloud_ai_platform_test"
 os.environ["AUTH_MYSQL_DATABASE"] = "cloud_ai_auth_test"
+# Tracing itself is unit-tested directly against a throwaway app/engine in
+# test_observability.py - disabled here so every one of this suite's many
+# HTTP requests doesn't also print a ConsoleSpanExporter span to stdout.
+os.environ["OTEL_ENABLED"] = "false"
 
 import pytest
 from fastapi import Request
