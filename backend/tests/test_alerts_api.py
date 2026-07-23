@@ -38,6 +38,7 @@ def test_evaluate_alerts_returns_summary_for_operator(client, make_user_with_rol
     body = response.json()
     assert set(body.keys()) == {
         "deployments_evaluated",
+        "projects_evaluated",
         "alerts_created",
         "alerts_resolved",
         "notifications_sent",

@@ -22,6 +22,14 @@ class DeploymentBase(BaseModel):
     memory_limit_mb: float | None = Field(
         default=None, ge=0, description="Configured memory limit per pod, in MB"
     )
+    disk_limit_mb: float | None = Field(
+        default=None, ge=0, description="Configured disk limit per pod, in MB (Phase 21)"
+    )
+    network_limit_kbps: float | None = Field(
+        default=None,
+        ge=0,
+        description="Configured combined (in+out) network bandwidth limit per pod, in kbps (Phase 21)",
+    )
     cloud_provider_account_id: int | None = Field(
         default=None,
         description="Cloud provider account to use for syncing real cloud metrics",
@@ -45,6 +53,8 @@ class DeploymentUpdate(BaseModel):
     replicas: int | None = Field(default=None, ge=0)
     status: DeploymentStatus | None = None
     memory_limit_mb: float | None = Field(default=None, ge=0)
+    disk_limit_mb: float | None = Field(default=None, ge=0)
+    network_limit_kbps: float | None = Field(default=None, ge=0)
     cloud_provider_account_id: int | None = None
     cloud_resource_identifier: str | None = Field(default=None, max_length=200)
 

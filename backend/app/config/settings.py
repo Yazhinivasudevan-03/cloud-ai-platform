@@ -81,6 +81,24 @@ class Settings(BaseSettings):
     ALERT_MEMORY_WARNING_THRESHOLD: float = 60.0
     ALERT_MEMORY_CRITICAL_THRESHOLD: float = 80.0
     ALERT_MEMORY_SATURATED_THRESHOLD: float = 90.0
+    # Disk/network alerting (Phase 21) - same shape as memory: skipped
+    # entirely for a deployment with no configured limit to divide by.
+    ALERT_DISK_WARNING_THRESHOLD: float = 60.0
+    ALERT_DISK_CRITICAL_THRESHOLD: float = 80.0
+    ALERT_DISK_SATURATED_THRESHOLD: float = 90.0
+    # Network utilization = (network_in_kbps + network_out_kbps) /
+    # network_limit_kbps - a single combined-bandwidth figure, not separate
+    # inbound/outbound alert families, matching how the request named this
+    # "Network Usage" as one metric.
+    ALERT_NETWORK_WARNING_THRESHOLD: float = 60.0
+    ALERT_NETWORK_CRITICAL_THRESHOLD: float = 80.0
+    ALERT_NETWORK_SATURATED_THRESHOLD: float = 90.0
+    # Cost alerting (Phase 21) - project-scoped (see Project.monthly_budget),
+    # not deployment-scoped like every other alert type above, since spend
+    # is tracked per-project via CloudCost, not per-deployment.
+    ALERT_COST_WARNING_THRESHOLD: float = 60.0
+    ALERT_COST_CRITICAL_THRESHOLD: float = 80.0
+    ALERT_COST_SATURATED_THRESHOLD: float = 90.0
     ALERT_FAILURE_WARNING_THRESHOLD: float = 0.5
     ALERT_FAILURE_CRITICAL_THRESHOLD: float = 0.8
 

@@ -33,6 +33,20 @@ class Deployment(TimestampMixin, Base):
         "without one configured, since memory_usage_mb alone can't be turned "
         "into a utilization percentage without a limit to divide by.",
     )
+    disk_limit_mb: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Configured disk limit per pod, in MB (Phase 21). Nullable - "
+        "disk-based alerting is skipped for deployments without one "
+        "configured, the same guard memory_limit_mb already uses.",
+    )
+    network_limit_kbps: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Configured combined (in+out) network bandwidth limit per pod, "
+        "in kbps (Phase 21). Nullable - network-based alerting is skipped for "
+        "deployments without one configured.",
+    )
     cloud_provider_account_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("cloud_provider_accounts.id", ondelete="SET NULL"),

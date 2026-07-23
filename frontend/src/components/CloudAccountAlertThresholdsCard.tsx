@@ -12,7 +12,13 @@ type TierField =
   | "cpu_saturated_threshold"
   | "memory_warning_threshold"
   | "memory_critical_threshold"
-  | "memory_saturated_threshold";
+  | "memory_saturated_threshold"
+  | "disk_warning_threshold"
+  | "disk_critical_threshold"
+  | "disk_saturated_threshold"
+  | "network_warning_threshold"
+  | "network_critical_threshold"
+  | "network_saturated_threshold";
 
 const TIER_ROWS: { metric: string; fields: [TierField, TierField, TierField] }[] = [
   {
@@ -22,6 +28,14 @@ const TIER_ROWS: { metric: string; fields: [TierField, TierField, TierField] }[]
   {
     metric: "Memory",
     fields: ["memory_warning_threshold", "memory_critical_threshold", "memory_saturated_threshold"],
+  },
+  {
+    metric: "Disk",
+    fields: ["disk_warning_threshold", "disk_critical_threshold", "disk_saturated_threshold"],
+  },
+  {
+    metric: "Network",
+    fields: ["network_warning_threshold", "network_critical_threshold", "network_saturated_threshold"],
   },
 ];
 
@@ -46,6 +60,12 @@ export function CloudAccountAlertThresholdsCard({ accountId }: { accountId: numb
       memory_warning_threshold: thresholdsQuery.data.memory_warning_threshold,
       memory_critical_threshold: thresholdsQuery.data.memory_critical_threshold,
       memory_saturated_threshold: thresholdsQuery.data.memory_saturated_threshold,
+      disk_warning_threshold: thresholdsQuery.data.disk_warning_threshold,
+      disk_critical_threshold: thresholdsQuery.data.disk_critical_threshold,
+      disk_saturated_threshold: thresholdsQuery.data.disk_saturated_threshold,
+      network_warning_threshold: thresholdsQuery.data.network_warning_threshold,
+      network_critical_threshold: thresholdsQuery.data.network_critical_threshold,
+      network_saturated_threshold: thresholdsQuery.data.network_saturated_threshold,
     });
   }, [thresholdsQuery.data]);
 
@@ -75,8 +95,8 @@ export function CloudAccountAlertThresholdsCard({ accountId }: { accountId: numb
         Alert thresholds
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Overrides for CPU and memory alerts on deployments linked to this account. Leave a field
-        blank to use the platform-wide default shown as its placeholder.
+        Overrides for CPU/memory/disk/network alerts on deployments linked to this account. Leave
+        a field blank to use the platform-wide default shown as its placeholder.
       </Typography>
 
       <Stack spacing={2}>

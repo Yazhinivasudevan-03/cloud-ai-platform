@@ -1,5 +1,5 @@
-"""Integration tests for the per-cloud-account CPU/memory alert threshold
-API (Phase 20)."""
+"""Integration tests for the per-cloud-account CPU/memory/disk/network
+alert threshold API (Phase 20-21)."""
 def _auth_header(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
@@ -35,6 +35,30 @@ def test_get_thresholds_returns_platform_defaults_when_never_configured(client, 
     assert body["effective_memory_warning_threshold"] == 60.0
     assert body["effective_memory_critical_threshold"] == 80.0
     assert body["effective_memory_saturated_threshold"] == 90.0
+    assert body["effective_disk_warning_threshold"] == 60.0
+    assert body["effective_disk_critical_threshold"] == 80.0
+    assert body["effective_disk_saturated_threshold"] == 90.0
+    assert body["effective_network_warning_threshold"] == 60.0
+    assert body["effective_network_critical_threshold"] == 80.0
+    assert body["effective_network_saturated_threshold"] == 90.0
+
+
+def test_update_disk_and_network_thresholds(client, make_user_with_role):
+    token = make_user_with_role("threshold_user_g")
+    account_id = _create_account(client, token)
+
+    response = client.put(
+        f"/api/v1/cloud-provider-accounts/{account_id}/alert-thresholds",
+        json={"disk_warning_threshold": 50.0, "network_saturated_threshold": 95.0},
+        headers=_auth_header(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["effective_disk_warning_threshold"] == 50.0
+    assert body["effective_disk_critical_threshold"] == 80.0  # untouched
+    assert body["effective_network_saturated_threshold"] == 95.0
+    assert body["effective_network_warning_threshold"] == 60.0  # untouched
 
 
 def test_update_thresholds_persists_override_and_reports_it_as_effective(client, make_user_with_role):

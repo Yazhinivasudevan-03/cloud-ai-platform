@@ -70,6 +70,8 @@ class DeploymentService:
             replicas=payload.replicas,
             status=payload.status.value,
             memory_limit_mb=payload.memory_limit_mb,
+            disk_limit_mb=payload.disk_limit_mb,
+            network_limit_kbps=payload.network_limit_kbps,
             cloud_provider_account_id=payload.cloud_provider_account_id,
             cloud_resource_identifier=payload.cloud_resource_identifier,
         )
@@ -129,6 +131,10 @@ class DeploymentService:
             deployment.status = payload.status.value
         if payload.memory_limit_mb is not None:
             deployment.memory_limit_mb = payload.memory_limit_mb
+        if payload.disk_limit_mb is not None:
+            deployment.disk_limit_mb = payload.disk_limit_mb
+        if payload.network_limit_kbps is not None:
+            deployment.network_limit_kbps = payload.network_limit_kbps
         if payload.cloud_provider_account_id is not None:
             self._check_cloud_account_ownership(payload.cloud_provider_account_id, current_user_id)
             deployment.cloud_provider_account_id = payload.cloud_provider_account_id

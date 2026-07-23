@@ -17,7 +17,13 @@ from app.controllers.project_controller import ProjectController
 from app.database.session import get_db
 from app.models.user import User
 from app.schemas.common import ErrorResponse, PaginatedResponse
-from app.schemas.project import ProjectCreate, ProjectRead, ProjectUpdate
+from app.schemas.project import (
+    ProjectCostThresholdRead,
+    ProjectCostThresholdUpdate,
+    ProjectCreate,
+    ProjectRead,
+    ProjectUpdate,
+)
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
@@ -94,3 +100,33 @@ def update_project(
 )
 def delete_project(project_id: int, db: Session = Depends(get_db)) -> None:
     ProjectController(db).delete(project_id)
+
+
+@router.get(
+    "/{project_id}/cost-thresholds",
+    response_model=ProjectCostThresholdRead,
+    summary="Get a project's monthly budget and cost alert threshold overrides",
+    responses={404: {"model": ErrorResponse, "description": "Project not found"}},
+)
+def get_project_cost_thresholds(
+    project_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_active_user),
+) -> ProjectCostThresholdRead:
+    return ProjectController(db).get_cost_thresholds(project_id)
+
+
+@router.put(
+    "/{project_id}/cost-thresholds",
+    response_model=ProjectCostThresholdRead,
+    summary="Update a project's monthly budget and cost alert threshold overrides (operator/admin)",
+    dependencies=[Depends(require_roles("operator", "admin"))],
+    responses={
+        404: {"model": ErrorResponse, "description": "Project not found"},
+        422: {"model": ErrorResponse, "description": "Thresholds are not in strictly ascending order"},
+    },
+)
+def update_project_cost_thresholds(
+    project_id: int, payload: ProjectCostThresholdUpdate, db: Session = Depends(get_db)
+) -> ProjectCostThresholdRead:
+    return ProjectController(db).update_cost_thresholds(project_id, payload)

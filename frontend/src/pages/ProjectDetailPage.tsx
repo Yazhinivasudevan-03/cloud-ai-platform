@@ -21,6 +21,7 @@ import AddIcon from "@mui/icons-material/Add";
 import { PageHeader } from "@/components/PageHeader";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { ErrorAlert } from "@/components/ErrorAlert";
+import { ProjectCostThresholdsCard } from "@/components/ProjectCostThresholdsCard";
 import { microservicesApi } from "@/services/microservicesApi";
 import { projectsApi } from "@/services/projectsApi";
 import { cloudCostsApi } from "@/services/cloudCostsApi";
@@ -117,6 +118,7 @@ export function ProjectDetailPage() {
 
       {tab === 1 && (
         <Stack spacing={2}>
+          <ProjectCostThresholdsCard projectId={id} />
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, md: 5 }}>
               <Paper sx={{ p: 2.5 }}>

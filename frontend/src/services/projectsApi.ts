@@ -1,5 +1,10 @@
 import { httpClient } from "./httpClient";
-import type { PaginatedResponse, Project } from "@/types";
+import type {
+  PaginatedResponse,
+  Project,
+  ProjectCostThreshold,
+  ProjectCostThresholdUpdate,
+} from "@/types";
 
 export interface ProjectPayload {
   name: string;
@@ -37,4 +42,12 @@ export const projectsApi = {
     httpClient.put<Project>(`/projects/${projectId}`, payload).then((r) => r.data),
 
   remove: (projectId: number) => httpClient.delete(`/projects/${projectId}`).then(() => undefined),
+
+  getCostThresholds: (projectId: number) =>
+    httpClient.get<ProjectCostThreshold>(`/projects/${projectId}/cost-thresholds`).then((r) => r.data),
+
+  updateCostThresholds: (projectId: number, payload: ProjectCostThresholdUpdate) =>
+    httpClient
+      .put<ProjectCostThreshold>(`/projects/${projectId}/cost-thresholds`, payload)
+      .then((r) => r.data),
 };

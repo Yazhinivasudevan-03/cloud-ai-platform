@@ -69,6 +69,26 @@ export interface Project {
   updated_at: string;
 }
 
+// --- Project cost thresholds (Phase 21) ---------------------------------
+
+export interface ProjectCostThreshold {
+  project_id: number;
+  monthly_budget: number | null;
+  cost_warning_threshold: number | null;
+  cost_critical_threshold: number | null;
+  cost_saturated_threshold: number | null;
+  effective_cost_warning_threshold: number;
+  effective_cost_critical_threshold: number;
+  effective_cost_saturated_threshold: number;
+}
+
+export interface ProjectCostThresholdUpdate {
+  monthly_budget?: number | null;
+  cost_warning_threshold?: number | null;
+  cost_critical_threshold?: number | null;
+  cost_saturated_threshold?: number | null;
+}
+
 export interface Microservice {
   id: number;
   project_id: number;
@@ -92,6 +112,8 @@ export interface Deployment {
   replicas: number;
   status: DeploymentStatus;
   memory_limit_mb: number | null;
+  disk_limit_mb: number | null;
+  network_limit_kbps: number | null;
   cloud_provider_account_id: number | null;
   cloud_resource_identifier: string | null;
   created_at: string;
@@ -189,6 +211,7 @@ export type AlertStatus = "active" | "acknowledged" | "resolved";
 export interface Alert {
   id: number;
   deployment_id: number | null;
+  project_id: number | null;
   alert_type: string;
   severity: AlertSeverity;
   threshold_percent: number | null;
@@ -201,6 +224,7 @@ export interface Alert {
 
 export interface AlertEvaluationSummary {
   deployments_evaluated: number;
+  projects_evaluated: number;
   alerts_created: number;
   alerts_resolved: number;
   notifications_sent: number;
@@ -348,7 +372,7 @@ export interface NotificationSettingTestResult {
   slack_sent: boolean | null;
 }
 
-// --- Cloud account alert thresholds (Phase 20) -------------------------
+// --- Cloud account alert thresholds (Phase 20-21) -----------------------
 
 export interface CloudAccountAlertThreshold {
   cloud_provider_account_id: number;
@@ -358,12 +382,24 @@ export interface CloudAccountAlertThreshold {
   memory_warning_threshold: number | null;
   memory_critical_threshold: number | null;
   memory_saturated_threshold: number | null;
+  disk_warning_threshold: number | null;
+  disk_critical_threshold: number | null;
+  disk_saturated_threshold: number | null;
+  network_warning_threshold: number | null;
+  network_critical_threshold: number | null;
+  network_saturated_threshold: number | null;
   effective_cpu_warning_threshold: number;
   effective_cpu_critical_threshold: number;
   effective_cpu_saturated_threshold: number;
   effective_memory_warning_threshold: number;
   effective_memory_critical_threshold: number;
   effective_memory_saturated_threshold: number;
+  effective_disk_warning_threshold: number;
+  effective_disk_critical_threshold: number;
+  effective_disk_saturated_threshold: number;
+  effective_network_warning_threshold: number;
+  effective_network_critical_threshold: number;
+  effective_network_saturated_threshold: number;
 }
 
 export interface CloudAccountAlertThresholdUpdate {
@@ -373,4 +409,10 @@ export interface CloudAccountAlertThresholdUpdate {
   memory_warning_threshold?: number | null;
   memory_critical_threshold?: number | null;
   memory_saturated_threshold?: number | null;
+  disk_warning_threshold?: number | null;
+  disk_critical_threshold?: number | null;
+  disk_saturated_threshold?: number | null;
+  network_warning_threshold?: number | null;
+  network_critical_threshold?: number | null;
+  network_saturated_threshold?: number | null;
 }

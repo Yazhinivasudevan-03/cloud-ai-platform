@@ -5,7 +5,13 @@ from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.schemas.common import PaginatedResponse, PaginationMeta
-from app.schemas.project import ProjectCreate, ProjectRead, ProjectUpdate
+from app.schemas.project import (
+    ProjectCostThresholdRead,
+    ProjectCostThresholdUpdate,
+    ProjectCreate,
+    ProjectRead,
+    ProjectUpdate,
+)
 from app.services.project_service import ProjectService
 
 
@@ -37,3 +43,11 @@ class ProjectController:
 
     def delete(self, project_id: int) -> None:
         self.service.delete(project_id)
+
+    def get_cost_thresholds(self, project_id: int) -> ProjectCostThresholdRead:
+        return self.service.get_cost_thresholds(project_id)
+
+    def update_cost_thresholds(
+        self, project_id: int, payload: ProjectCostThresholdUpdate
+    ) -> ProjectCostThresholdRead:
+        return self.service.update_cost_thresholds(project_id, payload)

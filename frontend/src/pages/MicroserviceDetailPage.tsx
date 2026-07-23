@@ -59,6 +59,11 @@ export function MicroserviceDetailPage() {
     { header: "Replicas", render: (d) => d.replicas },
     { header: "Status", render: (d) => <StatusChip value={d.status} /> },
     { header: "Memory limit", render: (d) => (d.memory_limit_mb ? `${d.memory_limit_mb} MB` : "not set") },
+    { header: "Disk limit", render: (d) => (d.disk_limit_mb ? `${d.disk_limit_mb} MB` : "not set") },
+    {
+      header: "Network limit",
+      render: (d) => (d.network_limit_kbps ? `${d.network_limit_kbps} kbps` : "not set"),
+    },
   ];
 
   return (
@@ -104,6 +109,8 @@ function CreateDeploymentDialog({
   const [replicas, setReplicas] = useState("1");
   const [status, setStatus] = useState<DeploymentStatus>("unknown");
   const [memoryLimitMb, setMemoryLimitMb] = useState("");
+  const [diskLimitMb, setDiskLimitMb] = useState("");
+  const [networkLimitKbps, setNetworkLimitKbps] = useState("");
   const [error, setError] = useState<unknown>(null);
   const queryClient = useQueryClient();
 
@@ -115,6 +122,8 @@ function CreateDeploymentDialog({
         replicas: Number(replicas),
         status,
         memory_limit_mb: memoryLimitMb ? Number(memoryLimitMb) : undefined,
+        disk_limit_mb: diskLimitMb ? Number(diskLimitMb) : undefined,
+        network_limit_kbps: networkLimitKbps ? Number(networkLimitKbps) : undefined,
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["deployments", "for-microservice", microserviceId] });
@@ -123,6 +132,8 @@ function CreateDeploymentDialog({
       setReplicas("1");
       setStatus("unknown");
       setMemoryLimitMb("");
+      setDiskLimitMb("");
+      setNetworkLimitKbps("");
       onClose();
     },
     onError: setError,
@@ -163,9 +174,27 @@ function CreateDeploymentDialog({
             type="number"
             value={memoryLimitMb}
             onChange={(e) => setMemoryLimitMb(e.target.value)}
-            helperText="Needed for memory-based optimization recommendations - see Phase 6"
+            helperText="Needed for memory-based optimization recommendations and alerts"
             fullWidth
           />
+          <Box sx={{ display: "flex", gap: 2 }}>
+            <TextField
+              label="Disk limit (MB, optional)"
+              type="number"
+              value={diskLimitMb}
+              onChange={(e) => setDiskLimitMb(e.target.value)}
+              helperText="Needed for disk-usage alerts"
+              fullWidth
+            />
+            <TextField
+              label="Network limit (kbps, optional)"
+              type="number"
+              value={networkLimitKbps}
+              onChange={(e) => setNetworkLimitKbps(e.target.value)}
+              helperText="Combined in+out - needed for network-usage alerts"
+              fullWidth
+            />
+          </Box>
         </Stack>
       </DialogContent>
       <DialogActions>

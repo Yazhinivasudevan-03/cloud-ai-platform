@@ -2,13 +2,14 @@
 against the DB (not through the HTTP API) since it's triggered by the
 scheduler/POST /alerts/evaluate, not by a request body.
 """
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
 from app.models.alert import Alert
 from app.models.anomaly_detection import AnomalyDetection
 from app.models.cloud_account_alert_threshold import CloudAccountAlertThreshold
+from app.models.cloud_cost import CloudCost
 from app.models.cloud_provider_account import CloudProviderAccount
 from app.models.deployment import Deployment
 from app.models.failure_prediction import FailurePrediction
@@ -67,13 +68,15 @@ def admin_user(db_session):
     return user
 
 
-def _add_resource_usage(db_session, deployment_id: int, cpu_usage_percent: float):
+def _add_resource_usage(
+    db_session, deployment_id: int, cpu_usage_percent: float, disk_usage_mb: float = 1000.0
+):
     db_session.add(
         ResourceUsage(
             deployment_id=deployment_id,
             cpu_usage_percent=cpu_usage_percent,
             memory_usage_mb=500.0,
-            disk_usage_mb=1000.0,
+            disk_usage_mb=disk_usage_mb,
             network_in_kbps=50.0,
             network_out_kbps=30.0,
             recorded_at=datetime(2026, 7, 15, 12, 0, 0),
@@ -453,3 +456,228 @@ def test_no_admin_users_skips_notification_without_error(db_session, demo_deploy
 
     assert summary["alerts_created"] == 1
     assert summary["notifications_sent"] == 0
+
+
+# --- Disk alerting (Phase 21) ----------------------------------------------
+
+
+def test_disk_alerting_is_skipped_without_a_configured_limit(db_session, demo_deployment):
+    _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=10.0, disk_usage_mb=950.0)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    assert db_session.query(Alert).filter(Alert.deployment_id == demo_deployment.id).count() == 0
+
+
+@pytest.mark.parametrize(
+    "disk_usage_mb,expected_alert_type,expected_severity",
+    [
+        (500.0, None, None),
+        (650.0, "disk_elevated", "warning"),
+        (850.0, "disk_high", "critical"),
+        (950.0, "disk_saturated", "critical"),
+    ],
+)
+def test_disk_threshold_tiers(
+    db_session, demo_deployment, disk_usage_mb, expected_alert_type, expected_severity
+):
+    demo_deployment.disk_limit_mb = 1000.0
+    db_session.commit()
+    _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=10.0, disk_usage_mb=disk_usage_mb)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alerts = (
+        db_session.query(Alert)
+        .filter(Alert.deployment_id == demo_deployment.id, Alert.alert_type.like("disk_%"))
+        .all()
+    )
+    if expected_alert_type is None:
+        assert alerts == []
+    else:
+        assert len(alerts) == 1
+        assert alerts[0].alert_type == expected_alert_type
+        assert alerts[0].severity == expected_severity
+
+
+# --- Network alerting (Phase 21) --------------------------------------------
+
+
+def test_network_alerting_is_skipped_without_a_configured_limit(db_session, demo_deployment):
+    _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=10.0)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    assert db_session.query(Alert).filter(Alert.deployment_id == demo_deployment.id).count() == 0
+
+
+@pytest.mark.parametrize(
+    "network_in_kbps,network_out_kbps,expected_alert_type,expected_severity",
+    [
+        (200.0, 100.0, None, None),  # 300/1000 = 30%
+        (400.0, 250.0, "network_elevated", "warning"),  # 650/1000 = 65%
+        (500.0, 350.0, "network_high", "critical"),  # 850/1000 = 85%
+        (600.0, 350.0, "network_saturated", "critical"),  # 950/1000 = 95%
+    ],
+)
+def test_network_threshold_tiers(
+    db_session, demo_deployment, network_in_kbps, network_out_kbps, expected_alert_type, expected_severity
+):
+    demo_deployment.network_limit_kbps = 1000.0
+    db_session.commit()
+    db_session.add(
+        ResourceUsage(
+            deployment_id=demo_deployment.id,
+            cpu_usage_percent=10.0,
+            memory_usage_mb=100.0,
+            disk_usage_mb=100.0,
+            network_in_kbps=network_in_kbps,
+            network_out_kbps=network_out_kbps,
+            recorded_at=datetime(2026, 7, 15, 12, 0, 0),
+        )
+    )
+    db_session.commit()
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alerts = (
+        db_session.query(Alert)
+        .filter(Alert.deployment_id == demo_deployment.id, Alert.alert_type.like("network_%"))
+        .all()
+    )
+    if expected_alert_type is None:
+        assert alerts == []
+    else:
+        assert len(alerts) == 1
+        assert alerts[0].alert_type == expected_alert_type
+        assert alerts[0].severity == expected_severity
+
+
+# --- Cost alerting (Phase 21 - project-scoped, not deployment-scoped) -------
+
+
+@pytest.fixture()
+def demo_project(db_session):
+    owner = User(
+        username="cost_alert_owner", email="cost_alert_owner@example.com",
+        hashed_password="not-a-real-hash", is_active=True, is_superuser=False,
+    )
+    db_session.add(owner)
+    db_session.flush()
+    project = Project(name="Cost Alerting Demo", owner_id=owner.id)
+    db_session.add(project)
+    db_session.commit()
+    db_session.refresh(project)
+    return project
+
+
+def _add_cloud_cost(db_session, project_id: int, cost_amount: float):
+    today = date.today()
+    month_start = today.replace(day=1)
+    next_month_start = (month_start.replace(day=28) + timedelta(days=7)).replace(day=1)
+    db_session.add(
+        CloudCost(
+            project_id=project_id,
+            provider="aws",
+            service_name="EC2",
+            cost_amount=cost_amount,
+            currency="USD",
+            billing_period_start=month_start,
+            billing_period_end=next_month_start - timedelta(days=1),
+        )
+    )
+    db_session.commit()
+
+
+def test_cost_alerting_is_skipped_without_a_configured_budget(db_session, demo_project):
+    _add_cloud_cost(db_session, demo_project.id, 5000.0)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    assert db_session.query(Alert).filter(Alert.project_id == demo_project.id).count() == 0
+
+
+@pytest.mark.parametrize(
+    "spend,expected_alert_type,expected_severity",
+    [
+        (500.0, None, None),
+        (650.0, "cost_elevated", "warning"),
+        (850.0, "cost_high", "critical"),
+        (950.0, "cost_saturated", "critical"),
+    ],
+)
+def test_cost_threshold_tiers(db_session, demo_project, spend, expected_alert_type, expected_severity):
+    demo_project.monthly_budget = 1000.0
+    db_session.commit()
+    _add_cloud_cost(db_session, demo_project.id, spend)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alerts = (
+        db_session.query(Alert)
+        .filter(Alert.project_id == demo_project.id, Alert.alert_type.like("cost_%"))
+        .all()
+    )
+    if expected_alert_type is None:
+        assert alerts == []
+    else:
+        assert len(alerts) == 1
+        assert alerts[0].alert_type == expected_alert_type
+        assert alerts[0].severity == expected_severity
+        assert alerts[0].deployment_id is None
+        assert alerts[0].project_id == demo_project.id
+
+
+def test_cost_alert_sums_multiple_services_in_the_same_month(db_session, demo_project):
+    demo_project.monthly_budget = 1000.0
+    db_session.commit()
+    _add_cloud_cost(db_session, demo_project.id, 400.0)
+    _add_cloud_cost(db_session, demo_project.id, 300.0)  # combined 700 = 70% -> elevated
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alert = db_session.query(Alert).filter(Alert.project_id == demo_project.id).one()
+    assert alert.alert_type == "cost_elevated"
+
+
+def test_cost_alert_resolves_once_spend_drops_back_under_budget_next_evaluation(db_session, demo_project):
+    """Simulates a corrected/reduced cost entry - the same idempotent
+    resolve-on-clear lifecycle every other alert type already has."""
+    demo_project.monthly_budget = 1000.0
+    db_session.commit()
+    cost = CloudCost(
+        project_id=demo_project.id, provider="aws", service_name="EC2", cost_amount=950.0,
+        currency="USD", billing_period_start=date.today().replace(day=1),
+        billing_period_end=date.today().replace(day=1),
+    )
+    db_session.add(cost)
+    db_session.commit()
+
+    service = AlertEvaluationService(db_session)
+    summary = service.evaluate_all()
+    assert summary["alerts_created"] == 1
+
+    cost.cost_amount = 100.0
+    db_session.commit()
+    summary = service.evaluate_all()
+
+    assert summary["alerts_resolved"] == 1
+    active = (
+        db_session.query(Alert)
+        .filter(Alert.project_id == demo_project.id, Alert.status == "active")
+        .all()
+    )
+    assert active == []
+
+
+def test_custom_project_cost_threshold_override(db_session, demo_project):
+    demo_project.monthly_budget = 1000.0
+    demo_project.cost_warning_threshold = 40.0
+    db_session.commit()
+    _add_cloud_cost(db_session, demo_project.id, 450.0)  # 45% - below default 60%, above custom 40%
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alert = db_session.query(Alert).filter(Alert.project_id == demo_project.id).one()
+    assert alert.alert_type == "cost_elevated"
+    assert alert.threshold_percent == 40.0

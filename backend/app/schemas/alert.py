@@ -20,6 +20,7 @@ class AlertRead(BaseModel):
 
     id: int
     deployment_id: int | None
+    project_id: int | None
     alert_type: str
     severity: str
     threshold_percent: float | None
@@ -34,6 +35,7 @@ class AlertEvaluationSummary(BaseModel):
     """Response for POST /alerts/evaluate - what the rule engine just did."""
 
     deployments_evaluated: int
+    projects_evaluated: int
     alerts_created: int
     alerts_resolved: int
     notifications_sent: int

@@ -18,6 +18,14 @@ class Alert(TimestampMixin, Base):
     deployment_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("deployments.id", ondelete="CASCADE"), nullable=True, index=True
     )
+    # Cost alerts (Phase 21) are project-scoped, not deployment-scoped -
+    # spend is tracked per-project via CloudCost, so there is no single
+    # deployment a cost alert could sensibly attach to. Exactly one of
+    # deployment_id/project_id is set per alert in practice (enforced by
+    # AlertEvaluationService, not a DB constraint).
+    project_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     alert_type: Mapped[str] = mapped_column(String(50), nullable=False)
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
     threshold_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -27,6 +35,7 @@ class Alert(TimestampMixin, Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     deployment: Mapped["Deployment"] = relationship("Deployment", back_populates="alerts")
+    project: Mapped["Project | None"] = relationship("Project", back_populates="alerts")
     notifications: Mapped[list["Notification"]] = relationship(
         "Notification", back_populates="alert", cascade="all, delete-orphan"
     )

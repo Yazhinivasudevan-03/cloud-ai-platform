@@ -9,6 +9,8 @@ export interface DeploymentPayload {
   replicas?: number;
   status?: DeploymentStatus;
   memory_limit_mb?: number | null;
+  disk_limit_mb?: number | null;
+  network_limit_kbps?: number | null;
   cloud_provider_account_id?: number | null;
   cloud_resource_identifier?: string | null;
 }

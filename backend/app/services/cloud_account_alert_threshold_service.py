@@ -1,5 +1,5 @@
-"""Business logic for per-cloud-account CPU/memory alert threshold
-overrides (Phase 20). Ownership-checked the same way as
+"""Business logic for per-cloud-account CPU/memory/disk/network alert
+threshold overrides (Phase 20-21). Ownership-checked the same way as
 CloudProviderAccountService: only the account's own owner may view or
 change its thresholds.
 """
@@ -17,10 +17,9 @@ from app.schemas.cloud_account_alert_threshold import (
 )
 from app.utils.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 
-_TIER_GROUPS = (
-    ("cpu_warning_threshold", "cpu_critical_threshold", "cpu_saturated_threshold"),
-    ("memory_warning_threshold", "memory_critical_threshold", "memory_saturated_threshold"),
-)
+_METRICS = ("cpu", "memory", "disk", "network")
+_TIERS = ("warning", "critical", "saturated")
+_ALL_FIELDS = [f"{metric}_{tier}_threshold" for metric in _METRICS for tier in _TIERS]
 
 
 class CloudAccountAlertThresholdService:
@@ -54,10 +53,7 @@ class CloudAccountAlertThresholdService:
         threshold = self.repository.get_or_create(account_id)
         data = payload.model_dump(exclude_unset=True)
 
-        for field in (
-            "cpu_warning_threshold", "cpu_critical_threshold", "cpu_saturated_threshold",
-            "memory_warning_threshold", "memory_critical_threshold", "memory_saturated_threshold",
-        ):
+        for field in _ALL_FIELDS:
             if field in data:
                 setattr(threshold, field, data[field])
 
@@ -73,7 +69,8 @@ class CloudAccountAlertThresholdService:
         never actually fire - e.g. a custom cpu_warning_threshold of 95
         with the default cpu_critical_threshold of 80 would mean "warning"
         never triggers before "critical" already has."""
-        for warning_field, critical_field, saturated_field in _TIER_GROUPS:
+        for metric in _METRICS:
+            warning_field, critical_field, saturated_field = (f"{metric}_{tier}_threshold" for tier in _TIERS)
             warning, critical, saturated = (
                 self._effective(threshold, warning_field),
                 self._effective(threshold, critical_field),
@@ -94,18 +91,12 @@ class CloudAccountAlertThresholdService:
         return getattr(self.settings, f"ALERT_{field.upper()}")
 
     def _to_read(self, threshold: CloudAccountAlertThreshold) -> CloudAccountAlertThresholdRead:
+        fields = {field: getattr(threshold, field) for field in _ALL_FIELDS}
+        effective_fields = {
+            f"effective_{field}": self._effective(threshold, field) for field in _ALL_FIELDS
+        }
         return CloudAccountAlertThresholdRead(
             cloud_provider_account_id=threshold.cloud_provider_account_id,
-            cpu_warning_threshold=threshold.cpu_warning_threshold,
-            cpu_critical_threshold=threshold.cpu_critical_threshold,
-            cpu_saturated_threshold=threshold.cpu_saturated_threshold,
-            memory_warning_threshold=threshold.memory_warning_threshold,
-            memory_critical_threshold=threshold.memory_critical_threshold,
-            memory_saturated_threshold=threshold.memory_saturated_threshold,
-            effective_cpu_warning_threshold=self._effective(threshold, "cpu_warning_threshold"),
-            effective_cpu_critical_threshold=self._effective(threshold, "cpu_critical_threshold"),
-            effective_cpu_saturated_threshold=self._effective(threshold, "cpu_saturated_threshold"),
-            effective_memory_warning_threshold=self._effective(threshold, "memory_warning_threshold"),
-            effective_memory_critical_threshold=self._effective(threshold, "memory_critical_threshold"),
-            effective_memory_saturated_threshold=self._effective(threshold, "memory_saturated_threshold"),
+            **fields,
+            **effective_fields,
         )

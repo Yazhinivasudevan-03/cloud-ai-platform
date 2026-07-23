@@ -24,6 +24,18 @@ class AlertRepository(BaseRepository[Alert]):
         )
         return list(self.db.scalars(stmt).all())
 
+    def get_active_for_project(self, project_id: int, alert_type: str) -> Alert | None:
+        stmt = select(Alert).where(
+            Alert.project_id == project_id,
+            Alert.alert_type == alert_type,
+            Alert.status == "active",
+        )
+        return self.db.scalars(stmt).first()
+
+    def list_active_for_project(self, project_id: int) -> list[Alert]:
+        stmt = select(Alert).where(Alert.project_id == project_id, Alert.status == "active")
+        return list(self.db.scalars(stmt).all())
+
     def list_active_for_deployments(self, deployment_ids: list[int]) -> list[Alert]:
         """Every active alert across a set of deployments in one query -
         used to show a cloud provider account's alerts as a single list
