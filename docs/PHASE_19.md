@@ -466,7 +466,98 @@ global state.
   human-formatted line - a real, if minor, developer-experience
   regression traded for machine-parseability.
 
-## 7. Summary
+## 8. Addendum — Optimization recommendation auto-apply
+
+Requested as a follow-up after this phase shipped: recommendations were
+observed sitting at "pending" indefinitely on the running dev stack,
+which is the correct human-in-the-loop design (an operator/admin must
+explicitly `PATCH` a recommendation to `applied`/`dismissed`), but the
+user wanted a real auto-apply path as a feature, not just an explanation
+of the existing lifecycle.
+
+### What was built
+
+- **`RecommendationCondition`** (`app/optimization/recommendation_engine.py`)
+  gained two new nullable fields, `target_replicas`/`target_memory_limit_mb`,
+  populated only for the recommendation types that carry a concrete,
+  already safety-bounded numeric target: `scale_deployment` (the existing
+  HPA-style formula's own computed replica count) and
+  `increase_memory`/`reduce_memory` (a new equivalent HPA-style formula
+  for memory: `target_memory_limit_mb = avg_memory_usage_mb /
+  (OPTIMIZATION_TARGET_MEMORY_PERCENT / 100)`, new setting, default
+  70%). `increase_pods`/`reduce_pods` (qualitative only - there is no
+  single "correct" number beyond what `scale_deployment` already
+  computes), `increase_cpu`/`reduce_cpu` (no CPU-limit field exists on
+  `Deployment` to write a target onto), and `optimize_cost` (a financial
+  suggestion, not an infrastructure change) never carry one.
+- **`OptimizationService._auto_apply()`** (new): when a *new*
+  recommendation is about to be created, and `OPTIMIZATION_AUTO_APPLY_ENABLED`
+  is on, and the recommendation's type is in the configured
+  `OPTIMIZATION_AUTO_APPLY_TYPES` set, and the condition actually carries
+  a target value - it writes that target straight onto the `Deployment`
+  record (`replicas` or `memory_limit_mb`) and the recommendation is
+  created already `applied`, with `(auto-applied)` appended to its
+  description for transparency. Both settings default to
+  `OPTIMIZATION_AUTO_APPLY_ENABLED=false` /
+  `OPTIMIZATION_AUTO_APPLY_TYPES=scale_deployment,increase_memory,reduce_memory` -
+  off by default, matching this project's established pattern for any
+  behavior that changes infrastructure state without a human in the loop
+  (the same posture as `backend.vpa.enabled: false` in the Helm chart).
+- **No live Kubernetes API integration exists in this platform** (see
+  `docs/PHASE_8.md`) - auto-apply writes to this platform's own record of
+  the deployment's desired replicas/memory limit, not a real cluster's
+  actual `Deployment` object. This is disclosed in the code's own
+  docstring, not glossed over. The next scheduled evaluation re-reads
+  these same fields, so an auto-applied change is self-correcting: if it
+  over- or under-shoots, the following run recommends (and, if still
+  enabled, auto-applies) a further adjustment - the same closed-loop
+  behavior a real HPA has.
+- `OPTIMIZATION_AUTO_APPLY_ENABLED`/`OPTIMIZATION_AUTO_APPLY_TYPES` were
+  also added to `docker-compose.yml`'s backend environment block and the
+  root `.env.example`, matching how `ALERT_EVALUATION_INTERVAL_MINUTES`
+  is already exposed there - configurable without a code change.
+
+### Live-verified on the real running dev stack
+
+Existing stale pending recommendations on a demo deployment predated this
+feature (so weren't retroactively auto-applied - only *newly created*
+recommendations go through this path), so they were dismissed via the
+real `PATCH /optimization-recommendations/{id}` endpoint first. With
+`OPTIMIZATION_AUTO_APPLY_ENABLED=true` set and the backend restarted, a
+real `POST /optimization/evaluate` against the live dev database produced:
+
+```json
+{"deployments_evaluated": 17, "recommendations_created": 3, "recommendations_dismissed": 0, "recommendations_auto_applied": 2}
+```
+
+Confirmed directly against the database - the deployment's own record
+genuinely changed, not just the recommendation's status:
+
+| id | type | status | description |
+|---|---|---|---|
+| 9 | increase_memory | **applied** | "...increase the memory allocation to 1314MB. (auto-applied)" |
+| 10 | scale_deployment | **applied** | "...scale from 1 to 2 replica(s)... (auto-applied)" |
+| 8 | increase_pods | pending | (no numeric target - correctly never auto-applies) |
+
+`deployments.replicas` went from `1` to `2`; `deployments.memory_limit_mb`
+went from `1000` to `1314.3` - both real column values, not simulated.
+
+### Verification
+
+- 9 new tests: 5 in `tests/test_recommendation_engine.py` (each
+  recommendation type's `target_replicas`/`target_memory_limit_mb`
+  correctness, including the negative cases where both stay `None`) and 4
+  in `tests/test_optimization_service.py` (disabled-by-default leaves
+  everything unchanged; enabled auto-applies `scale_deployment` and
+  leaves the untargeted `increase_pods` pending in the same evaluation
+  pass; enabled auto-applies `increase_memory`; being in the configured
+  type set without a concrete target still never applies).
+- Full backend suite: **227/227 passing** (218 at the end of item 13's
+  checkpoint + 9 new).
+- Live-verified against the real running `cloud-ai-backend` container and
+  its real dev database (see above), not simulated.
+
+## 9. Summary
 
 All 13 items from the technical audit's prioritized roadmap are now
 complete, across Phase 17 (item 14) and Phase 18/19 (items 1-13). See

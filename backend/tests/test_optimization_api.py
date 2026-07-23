@@ -44,6 +44,7 @@ def test_evaluate_optimizations_returns_summary_for_operator(client, make_user_w
         "deployments_evaluated",
         "recommendations_created",
         "recommendations_dismissed",
+        "recommendations_auto_applied",
     }
 
 

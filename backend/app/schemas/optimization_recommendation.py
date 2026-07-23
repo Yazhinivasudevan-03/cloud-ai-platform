@@ -34,3 +34,4 @@ class OptimizationEvaluationSummary(BaseModel):
     deployments_evaluated: int
     recommendations_created: int
     recommendations_dismissed: int
+    recommendations_auto_applied: int

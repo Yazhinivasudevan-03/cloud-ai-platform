@@ -32,6 +32,16 @@ class RecommendationCondition:
     recommendation_type: str
     description: str
     direction: str  # "increase" or "decrease" - lets the cost step know whether this implies savings
+    # Populated only for types that carry a concrete, already safety-bounded
+    # numeric target - lets OptimizationService actually apply a
+    # recommendation (write it onto the Deployment record) rather than only
+    # ever describing it in prose. "increase_pods"/"reduce_pods" (qualitative
+    # only) and "increase_cpu"/"reduce_cpu" (no CPU-limit field exists on
+    # Deployment to act on) and "optimize_cost" (a financial suggestion, not
+    # an infrastructure change) never get one - there is nothing concrete to
+    # apply for those.
+    target_replicas: int | None = None
+    target_memory_limit_mb: float | None = None
 
 
 def evaluate(
@@ -86,14 +96,21 @@ def evaluate(
 
     if memory_limit_mb and memory_limit_mb > 0 and avg_memory_usage_mb is not None:
         memory_percent = (avg_memory_usage_mb / memory_limit_mb) * 100
+        # Same HPA-style formula as the CPU-driven scale_deployment target
+        # below, applied to memory: the limit that would bring current usage
+        # to exactly the target utilization percentage.
+        target_memory_limit_mb = round(
+            avg_memory_usage_mb / (settings.OPTIMIZATION_TARGET_MEMORY_PERCENT / 100), 1
+        )
         if memory_percent >= settings.OPTIMIZATION_MEMORY_HIGH_THRESHOLD:
             conditions.append(
                 RecommendationCondition(
                     "increase_memory",
                     f"Average memory usage is {memory_percent:.1f}% of the "
                     f"configured {memory_limit_mb:.0f}MB limit - increase the "
-                    f"memory allocation.",
+                    f"memory allocation to {target_memory_limit_mb:.0f}MB.",
                     "increase",
+                    target_memory_limit_mb=target_memory_limit_mb,
                 )
             )
         elif memory_percent <= settings.OPTIMIZATION_MEMORY_LOW_THRESHOLD:
@@ -102,8 +119,9 @@ def evaluate(
                     "reduce_memory",
                     f"Average memory usage is only {memory_percent:.1f}% of the "
                     f"configured {memory_limit_mb:.0f}MB limit - reduce the memory "
-                    f"allocation.",
+                    f"allocation to {target_memory_limit_mb:.0f}MB.",
                     "decrease",
+                    target_memory_limit_mb=target_memory_limit_mb,
                 )
             )
 
@@ -126,6 +144,7 @@ def evaluate(
                     f"replica(s) to bring average CPU from "
                     f"{avg_cpu_usage_percent:.1f}% towards the {target:.0f}% target.",
                     "decrease" if desired_replicas < replicas else "increase",
+                    target_replicas=desired_replicas,
                 )
             )
 

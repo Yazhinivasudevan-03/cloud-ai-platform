@@ -230,6 +230,7 @@ export interface OptimizationEvaluationSummary {
   deployments_evaluated: number;
   recommendations_created: number;
   recommendations_dismissed: number;
+  recommendations_auto_applied: number;
 }
 
 export interface CloudCost {

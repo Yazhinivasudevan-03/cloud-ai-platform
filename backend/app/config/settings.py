@@ -108,6 +108,22 @@ class Settings(BaseSettings):
     # the recommendation engine falls back to past actuals only - see
     # OptimizationService._effective_cpu/_effective_memory.
     OPTIMIZATION_PREDICTION_CONFIDENCE_THRESHOLD: float = 0.5
+    # HPA-style target for memory, mirroring OPTIMIZATION_TARGET_CPU_PERCENT -
+    # used to compute a concrete target_memory_limit_mb for increase_memory/
+    # reduce_memory recommendations (see recommendation_engine.evaluate()).
+    OPTIMIZATION_TARGET_MEMORY_PERCENT: float = 70.0
+
+    # Auto-apply (off by default - a recommendation with a real, bounded
+    # numeric target can apply itself immediately instead of waiting for an
+    # operator/admin to action it via PATCH /optimization-recommendations/{id}.
+    # Only recommendation types that carry a concrete, already safety-bounded
+    # target value (see RecommendationCondition.target_replicas/
+    # target_memory_limit_mb) are ever eligible - "increase_cpu"/"reduce_cpu"
+    # (no CPU-limit field exists on Deployment to act on) and "optimize_cost"
+    # (a financial suggestion, not an infrastructure change) never auto-apply
+    # regardless of this setting, since there is nothing concrete to apply.
+    OPTIMIZATION_AUTO_APPLY_ENABLED: bool = False
+    OPTIMIZATION_AUTO_APPLY_TYPES: str = "scale_deployment,increase_memory,reduce_memory"
 
     # Real-time cloud metrics sync (Phase 12) - periodically pulls real
     # telemetry from each linked deployment's cloud provider account
@@ -136,6 +152,10 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def optimization_auto_apply_types_set(self) -> set[str]:
+        return {t.strip() for t in self.OPTIMIZATION_AUTO_APPLY_TYPES.split(",") if t.strip()}
 
     @property
     def sqlalchemy_database_uri(self) -> str:

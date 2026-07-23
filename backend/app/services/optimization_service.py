@@ -104,23 +104,26 @@ class OptimizationService:
 
         recommendations_created = 0
         recommendations_dismissed = 0
+        recommendations_auto_applied = 0
 
         for deployment_id in deployment_ids:
-            created, dismissed = self._evaluate_deployment(deployment_id)
+            created, dismissed, auto_applied = self._evaluate_deployment(deployment_id)
             recommendations_created += created
             recommendations_dismissed += dismissed
+            recommendations_auto_applied += auto_applied
 
         return {
             "deployments_evaluated": len(deployment_ids),
             "recommendations_created": recommendations_created,
             "recommendations_dismissed": recommendations_dismissed,
+            "recommendations_auto_applied": recommendations_auto_applied,
         }
 
-    def _evaluate_deployment(self, deployment_id: int) -> tuple[int, int]:
+    def _evaluate_deployment(self, deployment_id: int) -> tuple[int, int, int]:
         deployment = self.db.get(Deployment, deployment_id)
         window = self._recent_usage_window(deployment_id)
         if not window:
-            return 0, 0
+            return 0, 0, 0
 
         avg_cpu = sum(row.cpu_usage_percent for row in window) / len(window)
         avg_memory = sum(row.memory_usage_mb for row in window) / len(window)
@@ -140,6 +143,7 @@ class OptimizationService:
 
         recommendations_created = 0
         recommendations_dismissed = 0
+        recommendations_auto_applied = 0
 
         for existing in self.repository.list_pending_for_deployment(deployment_id):
             if existing.recommendation_type not in desired_types:
@@ -167,13 +171,19 @@ class OptimizationService:
             elif condition.recommendation_type in _MEMORY_RECOMMENDATION_TYPES and memory_note:
                 description = f"{description} {memory_note}"
 
+            status = "pending"
+            if self._auto_apply(deployment, condition):
+                status = "applied"
+                description = f"{description} (auto-applied)"
+                recommendations_auto_applied += 1
+
             self.db.add(
                 OptimizationRecommendation(
                     deployment_id=deployment_id,
                     recommendation_type=condition.recommendation_type,
                     description=description,
                     estimated_savings=None,
-                    status="pending",
+                    status=status,
                 )
             )
             recommendations_created += 1
@@ -182,7 +192,35 @@ class OptimizationService:
             recommendations_created += 1
 
         self.db.commit()
-        return recommendations_created, recommendations_dismissed
+        return recommendations_created, recommendations_dismissed, recommendations_auto_applied
+
+    def _auto_apply(self, deployment: Deployment, condition) -> bool:
+        """Writes a recommendation's concrete target straight onto the
+        Deployment record and reports whether it did - only for types with
+        a real, already safety-bounded numeric target (see
+        RecommendationCondition), and only when OPTIMIZATION_AUTO_APPLY_ENABLED
+        is on and this specific type is in the configured auto-apply set.
+
+        There is no live Kubernetes API integration in this platform (see
+        docs/PHASE_8.md) - this updates this platform's own record of the
+        deployment's desired replicas/memory limit, not a real cluster's
+        actual Deployment object. The next scheduled evaluation re-reads
+        these same fields, so an auto-applied change is self-correcting:
+        if it overshoots or undershoots, the following run recommends
+        (and, if still enabled, auto-applies) a further adjustment.
+        """
+        if not self.settings.OPTIMIZATION_AUTO_APPLY_ENABLED:
+            return False
+        if condition.recommendation_type not in self.settings.optimization_auto_apply_types_set:
+            return False
+
+        if condition.target_replicas is not None:
+            deployment.replicas = condition.target_replicas
+            return True
+        if condition.target_memory_limit_mb is not None:
+            deployment.memory_limit_mb = condition.target_memory_limit_mb
+            return True
+        return False
 
     def _blend_with_forecast(
         self, deployment_id: int, metric_type: str, actual_value: float

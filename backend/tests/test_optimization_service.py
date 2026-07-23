@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
+from app.config.settings import get_settings
 from app.models.cloud_cost import CloudCost
 from app.models.deployment import Deployment
 from app.models.microservice import Microservice
@@ -342,3 +343,124 @@ def test_recommendation_is_recreated_once_cooldown_expires(db_session, demo_proj
     )
     assert len(pending) == 1
     assert summary["recommendations_created"] >= 1
+
+
+# --- Auto-apply (off by default) -----------------------------------------
+
+
+def test_auto_apply_disabled_by_default_leaves_recommendation_pending(
+    db_session, demo_project_and_deployment
+):
+    _, deployment = demo_project_and_deployment
+    _add_usage(db_session, deployment.id, cpu=90.0, memory=500.0, hour=10)
+
+    summary = OptimizationService(db_session).evaluate_all()
+
+    assert summary["recommendations_auto_applied"] == 0
+    db_session.refresh(deployment)
+    assert deployment.replicas == 2  # unchanged
+    scale_rec = (
+        db_session.query(OptimizationRecommendation)
+        .filter(
+            OptimizationRecommendation.deployment_id == deployment.id,
+            OptimizationRecommendation.recommendation_type == "scale_deployment",
+        )
+        .one()
+    )
+    assert scale_rec.status == "pending"
+
+
+def test_auto_apply_enabled_updates_deployment_replicas_for_scale_deployment(
+    db_session, demo_project_and_deployment, monkeypatch
+):
+    """cpu=90% with 2 replicas triggers both increase_pods (no numeric
+    target) and scale_deployment (a concrete HPA-style target_replicas) -
+    only scale_deployment is in the default auto-apply set and only it
+    carries a target, so only it should actually change the deployment."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OPTIMIZATION_AUTO_APPLY_ENABLED", True)
+    _, deployment = demo_project_and_deployment
+    _add_usage(db_session, deployment.id, cpu=90.0, memory=500.0, hour=10)
+
+    summary = OptimizationService(db_session).evaluate_all()
+
+    assert summary["recommendations_auto_applied"] == 1
+    db_session.refresh(deployment)
+    assert deployment.replicas == 3  # ceil(2 * 90/60)
+
+    scale_rec = (
+        db_session.query(OptimizationRecommendation)
+        .filter(
+            OptimizationRecommendation.deployment_id == deployment.id,
+            OptimizationRecommendation.recommendation_type == "scale_deployment",
+        )
+        .one()
+    )
+    assert scale_rec.status == "applied"
+    assert "(auto-applied)" in scale_rec.description
+
+    pods_rec = (
+        db_session.query(OptimizationRecommendation)
+        .filter(
+            OptimizationRecommendation.deployment_id == deployment.id,
+            OptimizationRecommendation.recommendation_type == "increase_pods",
+        )
+        .one()
+    )
+    assert pods_rec.status == "pending"  # no numeric target - never auto-applies
+
+
+def test_auto_apply_enabled_updates_deployment_memory_limit(
+    db_session, demo_project_and_deployment, monkeypatch
+):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OPTIMIZATION_AUTO_APPLY_ENABLED", True)
+    _, deployment = demo_project_and_deployment
+    # cpu held mid-band (45-75% given target 60/band 15) so only the memory
+    # condition fires - isolates the memory auto-apply path.
+    _add_usage(db_session, deployment.id, cpu=55.0, memory=950.0, hour=10)
+
+    OptimizationService(db_session).evaluate_all()
+
+    db_session.refresh(deployment)
+    assert deployment.memory_limit_mb == pytest.approx(1357.1, rel=0.01)  # 950 / 0.70
+
+    memory_rec = (
+        db_session.query(OptimizationRecommendation)
+        .filter(
+            OptimizationRecommendation.deployment_id == deployment.id,
+            OptimizationRecommendation.recommendation_type == "increase_memory",
+        )
+        .one()
+    )
+    assert memory_rec.status == "applied"
+
+
+def test_auto_apply_type_in_configured_set_but_without_a_target_never_applies(
+    db_session, demo_project_and_deployment, monkeypatch
+):
+    """Being in OPTIMIZATION_AUTO_APPLY_TYPES is necessary but not
+    sufficient - increase_pods has no concrete numeric target at all, so
+    even explicitly configuring it for auto-apply must not touch the
+    deployment or the recommendation's status."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OPTIMIZATION_AUTO_APPLY_ENABLED", True)
+    monkeypatch.setattr(settings, "OPTIMIZATION_AUTO_APPLY_TYPES", "increase_pods")
+    _, deployment = demo_project_and_deployment
+    _add_usage(db_session, deployment.id, cpu=90.0, memory=500.0, hour=10)
+
+    summary = OptimizationService(db_session).evaluate_all()
+
+    assert summary["recommendations_auto_applied"] == 0
+    db_session.refresh(deployment)
+    assert deployment.replicas == 2
+
+    pods_rec = (
+        db_session.query(OptimizationRecommendation)
+        .filter(
+            OptimizationRecommendation.deployment_id == deployment.id,
+            OptimizationRecommendation.recommendation_type == "increase_pods",
+        )
+        .one()
+    )
+    assert pods_rec.status == "pending"

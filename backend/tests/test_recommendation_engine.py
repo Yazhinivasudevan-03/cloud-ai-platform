@@ -1,4 +1,6 @@
 """Unit tests for the pure rule-based recommendation engine (no DB needed)."""
+import pytest
+
 from app.optimization.recommendation_engine import evaluate
 
 
@@ -106,3 +108,55 @@ def test_scale_deployment_desired_replicas_is_capped_at_max_scale_replicas():
     assert len(scale_conditions) == 1
     assert "to 10 replica" in scale_conditions[0].description
     assert "to 17 replica" not in scale_conditions[0].description
+
+
+# --- Concrete numeric targets (used by OptimizationService's auto-apply) --
+
+
+def test_scale_deployment_carries_a_concrete_target_replicas():
+    conditions = evaluate(
+        avg_cpu_usage_percent=90.0, avg_memory_usage_mb=100.0, memory_limit_mb=None, replicas=2
+    )
+    scale_condition = next(c for c in conditions if c.recommendation_type == "scale_deployment")
+    assert scale_condition.target_replicas == 3
+    assert scale_condition.target_memory_limit_mb is None
+
+
+def test_increase_pods_carries_no_concrete_target():
+    """Purely qualitative - there is no single "correct" replica count for
+    a horizontal scale-out beyond what scale_deployment already computes,
+    so this must never carry a target that would let it silently
+    auto-apply."""
+    conditions = evaluate(
+        avg_cpu_usage_percent=90.0, avg_memory_usage_mb=100.0, memory_limit_mb=None, replicas=2
+    )
+    pods_condition = next(c for c in conditions if c.recommendation_type == "increase_pods")
+    assert pods_condition.target_replicas is None
+    assert pods_condition.target_memory_limit_mb is None
+
+
+def test_increase_memory_carries_a_concrete_target_memory_limit():
+    conditions = evaluate(
+        avg_cpu_usage_percent=55.0, avg_memory_usage_mb=950.0, memory_limit_mb=1000.0, replicas=2
+    )
+    memory_condition = next(c for c in conditions if c.recommendation_type == "increase_memory")
+    assert memory_condition.target_memory_limit_mb == pytest.approx(1357.1, rel=0.01)  # 950 / 0.70
+    assert memory_condition.target_replicas is None
+
+
+def test_reduce_memory_carries_a_concrete_target_memory_limit():
+    conditions = evaluate(
+        avg_cpu_usage_percent=55.0, avg_memory_usage_mb=50.0, memory_limit_mb=1000.0, replicas=2
+    )
+    memory_condition = next(c for c in conditions if c.recommendation_type == "reduce_memory")
+    assert memory_condition.target_memory_limit_mb == pytest.approx(71.43, rel=0.01)  # 50 / 0.70
+
+
+def test_increase_cpu_carries_no_concrete_target():
+    """No CPU-limit field exists on Deployment to write a target onto."""
+    conditions = evaluate(
+        avg_cpu_usage_percent=90.0, avg_memory_usage_mb=100.0, memory_limit_mb=None, replicas=10
+    )
+    cpu_condition = next(c for c in conditions if c.recommendation_type == "increase_cpu")
+    assert cpu_condition.target_replicas is None
+    assert cpu_condition.target_memory_limit_mb is None
