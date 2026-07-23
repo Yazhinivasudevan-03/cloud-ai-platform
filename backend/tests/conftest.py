@@ -16,6 +16,13 @@ os.environ["AUTH_MYSQL_DATABASE"] = "cloud_ai_auth_test"
 # test_observability.py - disabled here so every one of this suite's many
 # HTTP requests doesn't also print a ConsoleSpanExporter span to stdout.
 os.environ["OTEL_ENABLED"] = "false"
+# Auto-apply is unit-tested explicitly, per test, via monkeypatch - forced
+# off here so a developer's own local .env (e.g. enabled for a live demo
+# against the real dev stack) can never leak into `docker compose run`'s
+# inherited service environment and make this suite's default-off
+# assertions fail non-deterministically depending on host state. This is
+# a real bug this project's own test suite caught, not a hypothetical one.
+os.environ["OPTIMIZATION_AUTO_APPLY_ENABLED"] = "false"
 
 import pytest
 from fastapi import Request

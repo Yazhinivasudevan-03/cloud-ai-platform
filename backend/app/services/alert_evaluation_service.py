@@ -20,6 +20,8 @@ from sqlalchemy.orm import Session
 from app.config.settings import get_settings
 from app.models.alert import Alert
 from app.models.anomaly_detection import AnomalyDetection
+from app.models.cloud_account_alert_threshold import CloudAccountAlertThreshold
+from app.models.cloud_provider_account import CloudProviderAccount
 from app.models.deployment import Deployment
 from app.models.failure_prediction import FailurePrediction
 from app.models.resource_usage import ResourceUsage
@@ -107,6 +109,8 @@ class AlertEvaluationService:
 
     def _desired_conditions(self, deployment_id: int) -> list[_Condition]:
         conditions: list[_Condition] = []
+        deployment = self.db.get(Deployment, deployment_id)
+        threshold_override = self._resolve_threshold_override(deployment)
 
         latest_usage = self.db.scalars(
             select(ResourceUsage)
@@ -115,9 +119,15 @@ class AlertEvaluationService:
             .limit(1)
         ).first()
         if latest_usage is not None:
-            cpu_condition = self._cpu_condition(latest_usage.cpu_usage_percent)
+            cpu_condition = self._cpu_condition(latest_usage.cpu_usage_percent, threshold_override)
             if cpu_condition is not None:
                 conditions.append(cpu_condition)
+
+            memory_condition = self._memory_condition(
+                latest_usage.memory_usage_mb, deployment.memory_limit_mb, threshold_override
+            )
+            if memory_condition is not None:
+                conditions.append(memory_condition)
 
         latest_anomaly = self.db.scalars(
             select(AnomalyDetection)
@@ -152,27 +162,98 @@ class AlertEvaluationService:
 
         return conditions
 
-    def _cpu_condition(self, cpu_usage_percent: float) -> _Condition | None:
-        if cpu_usage_percent >= self.settings.ALERT_CPU_SATURATED_THRESHOLD:
+    def _resolve_threshold_override(self, deployment: Deployment) -> CloudAccountAlertThreshold | None:
+        """A deployment's linked cloud provider account (if any) may have
+        its own CPU/memory threshold overrides (Phase 20) - null fields on
+        that override still fall back to the platform-wide Settings
+        default, resolved field-by-field in `_threshold()`."""
+        if deployment.cloud_provider_account_id is None:
+            return None
+        account = self.db.get(CloudProviderAccount, deployment.cloud_provider_account_id)
+        return account.alert_threshold if account is not None else None
+
+    def _threshold(
+        self, override: CloudAccountAlertThreshold | None, field: str, default: float
+    ) -> float:
+        if override is None:
+            return default
+        value = getattr(override, field)
+        return value if value is not None else default
+
+    def _cpu_condition(
+        self, cpu_usage_percent: float, override: CloudAccountAlertThreshold | None
+    ) -> _Condition | None:
+        warning = self._threshold(override, "cpu_warning_threshold", self.settings.ALERT_CPU_WARNING_THRESHOLD)
+        critical = self._threshold(override, "cpu_critical_threshold", self.settings.ALERT_CPU_CRITICAL_THRESHOLD)
+        saturated = self._threshold(override, "cpu_saturated_threshold", self.settings.ALERT_CPU_SATURATED_THRESHOLD)
+
+        if cpu_usage_percent >= saturated:
             return _Condition(
                 alert_type="cpu_saturated",
                 severity="critical",
-                threshold_percent=self.settings.ALERT_CPU_SATURATED_THRESHOLD,
+                threshold_percent=saturated,
                 message=f"CPU usage at {cpu_usage_percent:.1f}% - at capacity",
             )
-        if cpu_usage_percent >= self.settings.ALERT_CPU_CRITICAL_THRESHOLD:
+        if cpu_usage_percent >= critical:
             return _Condition(
                 alert_type="cpu_high",
                 severity="critical",
-                threshold_percent=self.settings.ALERT_CPU_CRITICAL_THRESHOLD,
+                threshold_percent=critical,
                 message=f"CPU usage at {cpu_usage_percent:.1f}% - above critical threshold",
             )
-        if cpu_usage_percent >= self.settings.ALERT_CPU_WARNING_THRESHOLD:
+        if cpu_usage_percent >= warning:
             return _Condition(
                 alert_type="cpu_elevated",
                 severity="warning",
-                threshold_percent=self.settings.ALERT_CPU_WARNING_THRESHOLD,
+                threshold_percent=warning,
                 message=f"CPU usage at {cpu_usage_percent:.1f}% - above warning threshold",
+            )
+        return None
+
+    def _memory_condition(
+        self,
+        memory_usage_mb: float,
+        memory_limit_mb: float | None,
+        override: CloudAccountAlertThreshold | None,
+    ) -> _Condition | None:
+        """Skipped entirely when the deployment has no configured
+        memory_limit_mb - memory_usage_mb alone can't be turned into a
+        utilization percentage without a limit to divide by, the same
+        guard OptimizationService's memory recommendations already use."""
+        if not memory_limit_mb or memory_limit_mb <= 0:
+            return None
+        memory_percent = (memory_usage_mb / memory_limit_mb) * 100
+
+        warning = self._threshold(
+            override, "memory_warning_threshold", self.settings.ALERT_MEMORY_WARNING_THRESHOLD
+        )
+        critical = self._threshold(
+            override, "memory_critical_threshold", self.settings.ALERT_MEMORY_CRITICAL_THRESHOLD
+        )
+        saturated = self._threshold(
+            override, "memory_saturated_threshold", self.settings.ALERT_MEMORY_SATURATED_THRESHOLD
+        )
+
+        if memory_percent >= saturated:
+            return _Condition(
+                alert_type="memory_saturated",
+                severity="critical",
+                threshold_percent=saturated,
+                message=f"Memory usage at {memory_percent:.1f}% of the configured limit - at capacity",
+            )
+        if memory_percent >= critical:
+            return _Condition(
+                alert_type="memory_high",
+                severity="critical",
+                threshold_percent=critical,
+                message=f"Memory usage at {memory_percent:.1f}% of the configured limit - above critical threshold",
+            )
+        if memory_percent >= warning:
+            return _Condition(
+                alert_type="memory_elevated",
+                severity="warning",
+                threshold_percent=warning,
+                message=f"Memory usage at {memory_percent:.1f}% of the configured limit - above warning threshold",
             )
         return None
 

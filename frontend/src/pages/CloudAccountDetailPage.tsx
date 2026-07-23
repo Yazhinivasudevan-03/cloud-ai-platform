@@ -2,6 +2,7 @@ import { Link as RouterLink, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Box, Chip, Link, Paper, Stack, Typography } from "@mui/material";
 import { PageHeader } from "@/components/PageHeader";
+import { CloudAccountAlertThresholdsCard } from "@/components/CloudAccountAlertThresholdsCard";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { StatusChip } from "@/components/StatusChip";
@@ -113,6 +114,10 @@ export function CloudAccountDetailPage() {
           </Stack>
         )}
       </Paper>
+
+      <Box sx={{ mb: 3 }}>
+        <CloudAccountAlertThresholdsCard accountId={id} />
+      </Box>
 
       <Paper sx={{ p: 2.5 }}>
         <Typography variant="h6" gutterBottom>

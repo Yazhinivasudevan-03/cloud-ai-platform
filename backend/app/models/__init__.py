@@ -8,6 +8,7 @@ from app.models.alert import Alert
 from app.models.anomaly_detection import AnomalyDetection
 from app.models.api_key import ApiKey
 from app.models.audit_log import AuditLog
+from app.models.cloud_account_alert_threshold import CloudAccountAlertThreshold
 from app.models.cloud_cost import CloudCost
 from app.models.cloud_provider_account import CloudProviderAccount
 from app.models.deployment import Deployment
@@ -16,6 +17,7 @@ from app.models.log import Log
 from app.models.metric import Metric
 from app.models.microservice import Microservice
 from app.models.notification import Notification
+from app.models.notification_setting import NotificationSetting
 from app.models.optimization_recommendation import OptimizationRecommendation
 from app.models.pod import Pod
 from app.models.prediction import Prediction
@@ -29,6 +31,7 @@ __all__ = [
     "AnomalyDetection",
     "ApiKey",
     "AuditLog",
+    "CloudAccountAlertThreshold",
     "CloudCost",
     "CloudProviderAccount",
     "Deployment",
@@ -37,6 +40,7 @@ __all__ = [
     "Metric",
     "Microservice",
     "Notification",
+    "NotificationSetting",
     "OptimizationRecommendation",
     "Pod",
     "Prediction",

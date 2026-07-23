@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Avatar, IconButton, ListItemIcon, Menu, MenuItem, Typography, Divider } from "@mui/material";
 import SettingsIcon from "@mui/icons-material/Settings";
+import NotificationsActiveIcon from "@mui/icons-material/NotificationsActive";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -40,6 +41,17 @@ export function UserMenu() {
             <SettingsIcon fontSize="small" />
           </ListItemIcon>
           Settings
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setAnchorEl(null);
+            navigate("/notification-settings");
+          }}
+        >
+          <ListItemIcon>
+            <NotificationsActiveIcon fontSize="small" />
+          </ListItemIcon>
+          Notification Settings
         </MenuItem>
         <MenuItem
           onClick={() => {

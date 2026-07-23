@@ -36,3 +36,9 @@ class CloudProviderAccount(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     user: Mapped["User"] = relationship("User", back_populates="cloud_provider_accounts")
+    alert_threshold: Mapped["CloudAccountAlertThreshold | None"] = relationship(
+        "CloudAccountAlertThreshold",
+        back_populates="cloud_provider_account",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )

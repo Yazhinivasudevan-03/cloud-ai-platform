@@ -63,12 +63,24 @@ class Settings(BaseSettings):
     # Resource usage ingestion - generous, since a real monitored deployment
     # may legitimately post readings often, but still bounded against abuse.
     RATE_LIMIT_INGESTION: str = "120/minute"
+    # Sends real messages through paid/rate-limited third-party APIs
+    # (Twilio SMS, Telegram, Slack) - deliberately tight so "Test
+    # Notification" can't be used to spam a channel or run up an SMS bill.
+    RATE_LIMIT_NOTIFICATION_TEST: str = "5/hour"
 
     # Alerting
     ALERT_EVALUATION_INTERVAL_MINUTES: int = 5
     ALERT_CPU_WARNING_THRESHOLD: float = 60.0
     ALERT_CPU_CRITICAL_THRESHOLD: float = 80.0
     ALERT_CPU_SATURATED_THRESHOLD: float = 100.0
+    # Memory alerting (Phase 20) - previously memory_usage_mb was only used
+    # by OptimizationService's recommendations, never turned into a real
+    # Alert. New, so uses the exact 60/80/90 tiers requested rather than
+    # inheriting CPU's historical 60/80/100 (CPU's saturated=100 predates
+    # this and is left unchanged to avoid altering already-tested behavior).
+    ALERT_MEMORY_WARNING_THRESHOLD: float = 60.0
+    ALERT_MEMORY_CRITICAL_THRESHOLD: float = 80.0
+    ALERT_MEMORY_SATURATED_THRESHOLD: float = 90.0
     ALERT_FAILURE_WARNING_THRESHOLD: float = 0.5
     ALERT_FAILURE_CRITICAL_THRESHOLD: float = 0.8
 

@@ -1,6 +1,8 @@
 import { httpClient } from "./httpClient";
 import type {
   Alert,
+  CloudAccountAlertThreshold,
+  CloudAccountAlertThresholdUpdate,
   CloudAccountDeploymentSummary,
   CloudProviderAccount,
   CloudProviderAccountCreate,
@@ -47,4 +49,14 @@ export const cloudProviderAccountsApi = {
 
   listActiveAlerts: (accountId: number) =>
     httpClient.get<Alert[]>(`/cloud-provider-accounts/${accountId}/alerts`).then((r) => r.data),
+
+  getAlertThresholds: (accountId: number) =>
+    httpClient
+      .get<CloudAccountAlertThreshold>(`/cloud-provider-accounts/${accountId}/alert-thresholds`)
+      .then((r) => r.data),
+
+  updateAlertThresholds: (accountId: number, payload: CloudAccountAlertThresholdUpdate) =>
+    httpClient
+      .put<CloudAccountAlertThreshold>(`/cloud-provider-accounts/${accountId}/alert-thresholds`, payload)
+      .then((r) => r.data),
 };

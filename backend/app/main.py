@@ -30,6 +30,7 @@ from app.routers import (
     metric_router,
     microservice_router,
     notification_router,
+    notification_setting_router,
     optimization_router,
     pod_router,
     prediction_router,
@@ -96,6 +97,7 @@ def create_app() -> FastAPI:
     app.include_router(prediction_router.router, prefix=settings.API_V1_PREFIX)
     app.include_router(alert_router.router, prefix=settings.API_V1_PREFIX)
     app.include_router(notification_router.router, prefix=settings.API_V1_PREFIX)
+    app.include_router(notification_setting_router.router, prefix=settings.API_V1_PREFIX)
     app.include_router(optimization_router.router, prefix=settings.API_V1_PREFIX)
     app.include_router(cloud_cost_router.router, prefix=settings.API_V1_PREFIX)
     app.include_router(cloud_provider_account_router.router, prefix=settings.API_V1_PREFIX)

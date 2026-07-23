@@ -17,6 +17,7 @@ import { CloudAccountsPage } from "@/pages/CloudAccountsPage";
 import { CloudAccountDetailPage } from "@/pages/CloudAccountDetailPage";
 import { UsersPage } from "@/pages/UsersPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { NotificationSettingsPage } from "@/pages/NotificationSettingsPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 
 export default function App() {
@@ -40,6 +41,7 @@ export default function App() {
           <Route path="/cloud-accounts" element={<CloudAccountsPage />} />
           <Route path="/cloud-accounts/:accountId" element={<CloudAccountDetailPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/notification-settings" element={<NotificationSettingsPage />} />
 
           <Route element={<RoleGuard roles={["admin"]} />}>
             <Route path="/users" element={<UsersPage />} />

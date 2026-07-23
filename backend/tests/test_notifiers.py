@@ -16,6 +16,7 @@ from app.config.settings import get_settings
 from app.notifications.email_notifier import send_email
 from app.notifications.slack_notifier import send_slack_message
 from app.notifications.sms_notifier import send_sms
+from app.notifications.teams_notifier import send_teams_message
 from app.notifications.telegram_notifier import send_telegram_message
 
 
@@ -79,6 +80,40 @@ def test_send_slack_message_posts_to_webhook_when_configured(monkeypatch):
     )
 
 
+def test_send_slack_message_per_user_override_wins_over_global_setting(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SLACK_WEBHOOK_URL", "https://hooks.slack.example/global-webhook")
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+
+    with patch("app.notifications.slack_notifier.httpx.post", return_value=mock_response) as mock_post:
+        result = send_slack_message("hello", webhook_url="https://hooks.slack.example/personal-webhook")
+
+    assert result is True
+    mock_post.assert_called_once_with(
+        "https://hooks.slack.example/personal-webhook",
+        json={"text": "hello"},
+        timeout=10,
+    )
+
+
+def test_send_slack_message_falls_back_to_global_setting_when_no_override(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SLACK_WEBHOOK_URL", "https://hooks.slack.example/global-webhook")
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+
+    with patch("app.notifications.slack_notifier.httpx.post", return_value=mock_response) as mock_post:
+        result = send_slack_message("hello", webhook_url=None)
+
+    assert result is True
+    mock_post.assert_called_once_with(
+        "https://hooks.slack.example/global-webhook", json={"text": "hello"}, timeout=10
+    )
+
+
 def test_send_telegram_message_returns_false_when_unconfigured(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "TELEGRAM_BOT_TOKEN", "")
@@ -104,6 +139,25 @@ def test_send_telegram_message_calls_bot_api_when_configured(monkeypatch):
     mock_post.assert_called_once_with(
         "https://api.telegram.org/bot123:abc/sendMessage",
         json={"chat_id": "999", "text": "hello from the alert engine"},
+        timeout=10,
+    )
+
+
+def test_send_telegram_message_per_user_override_wins_over_global_setting(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TELEGRAM_BOT_TOKEN", "global-token")
+    monkeypatch.setattr(settings, "TELEGRAM_CHAT_ID", "global-chat")
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+
+    with patch("app.notifications.telegram_notifier.httpx.post", return_value=mock_response) as mock_post:
+        result = send_telegram_message("hello", bot_token="personal-token", chat_id="personal-chat")
+
+    assert result is True
+    mock_post.assert_called_once_with(
+        "https://api.telegram.org/botpersonal-token/sendMessage",
+        json={"chat_id": "personal-chat", "text": "hello"},
         timeout=10,
     )
 
@@ -207,6 +261,24 @@ def test_send_sms_does_not_retry_bad_credentials(monkeypatch):
 
     assert result is False
     assert mock_post.call_count == 1
+
+
+def test_send_teams_message_returns_false_when_no_webhook_given():
+    result = send_teams_message("hello", webhook_url=None)
+    assert result is False
+
+
+def test_send_teams_message_posts_to_webhook_when_given():
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+
+    with patch("app.notifications.teams_notifier.httpx.post", return_value=mock_response) as mock_post:
+        result = send_teams_message("hello", webhook_url="https://outlook.office.example/webhook")
+
+    assert result is True
+    mock_post.assert_called_once_with(
+        "https://outlook.office.example/webhook", json={"text": "hello"}, timeout=10
+    )
 
 
 # --- Retry/backoff on transient failures ------------------------------------

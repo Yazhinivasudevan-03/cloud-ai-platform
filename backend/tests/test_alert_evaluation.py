@@ -8,6 +8,8 @@ import pytest
 
 from app.models.alert import Alert
 from app.models.anomaly_detection import AnomalyDetection
+from app.models.cloud_account_alert_threshold import CloudAccountAlertThreshold
+from app.models.cloud_provider_account import CloudProviderAccount
 from app.models.deployment import Deployment
 from app.models.failure_prediction import FailurePrediction
 from app.models.microservice import Microservice
@@ -16,6 +18,7 @@ from app.models.project import Project
 from app.models.resource_usage import ResourceUsage
 from app.models.user import Role, User
 from app.services.alert_evaluation_service import AlertEvaluationService
+from app.utils.crypto import encrypt_credentials
 
 
 @pytest.fixture()
@@ -103,18 +106,21 @@ def test_alert_notifies_admin_via_sms_when_twilio_configured_and_phone_number_se
 ):
     """Proves the SMS channel (Phase 19) is genuinely wired into the same
     fan-out every other channel goes through, not just unit-tested in
-    isolation - an admin with a phone_number on file gets a real "sms"
+    isolation - an admin with a phone_number on file and sms_enabled in
+    their NotificationSetting (Phase 20 - off by default) gets a real "sms"
     Notification row once Twilio is configured, mirroring how the
     pre-existing "dashboard" channel test above proves the base wiring."""
     from unittest.mock import MagicMock, patch
 
     from app.config.settings import get_settings
+    from app.models.notification_setting import NotificationSetting
 
     settings = get_settings()
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
     monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
     admin_user.phone_number = "+14155552671"
+    db_session.add(NotificationSetting(user_id=admin_user.id, sms_enabled=True))
     db_session.commit()
 
     _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=65.0)
@@ -131,6 +137,154 @@ def test_alert_notifies_admin_via_sms_when_twilio_configured_and_phone_number_se
         for n in db_session.query(Notification).filter(Notification.alert_id == alert.id).all()
     }
     assert "sms" in channels
+
+
+# --- Memory alerting (Phase 20 - previously memory had no alert path at all) --
+
+
+@pytest.fixture()
+def demo_deployment_with_memory_limit(db_session, demo_deployment):
+    demo_deployment.memory_limit_mb = 1000.0
+    db_session.commit()
+    db_session.refresh(demo_deployment)
+    return demo_deployment
+
+
+def _add_memory_usage(db_session, deployment_id: int, memory_usage_mb: float):
+    db_session.add(
+        ResourceUsage(
+            deployment_id=deployment_id,
+            cpu_usage_percent=10.0,  # comfortably below every CPU tier
+            memory_usage_mb=memory_usage_mb,
+            disk_usage_mb=1000.0,
+            network_in_kbps=50.0,
+            network_out_kbps=30.0,
+            recorded_at=datetime(2026, 7, 15, 12, 0, 0),
+        )
+    )
+    db_session.commit()
+
+
+def test_memory_alerting_is_skipped_without_a_configured_limit(db_session, demo_deployment):
+    _add_memory_usage(db_session, demo_deployment.id, memory_usage_mb=950.0)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    assert db_session.query(Alert).filter(Alert.deployment_id == demo_deployment.id).count() == 0
+
+
+@pytest.mark.parametrize(
+    "memory_usage_mb,expected_alert_type,expected_severity",
+    [
+        (500.0, None, None),
+        (650.0, "memory_elevated", "warning"),
+        (850.0, "memory_high", "critical"),
+        (950.0, "memory_saturated", "critical"),
+    ],
+)
+def test_memory_threshold_tiers(
+    db_session, demo_deployment_with_memory_limit, memory_usage_mb, expected_alert_type, expected_severity
+):
+    _add_memory_usage(db_session, demo_deployment_with_memory_limit.id, memory_usage_mb)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alerts = (
+        db_session.query(Alert)
+        .filter(Alert.deployment_id == demo_deployment_with_memory_limit.id, Alert.alert_type.like("memory_%"))
+        .all()
+    )
+    if expected_alert_type is None:
+        assert alerts == []
+    else:
+        assert len(alerts) == 1
+        assert alerts[0].alert_type == expected_alert_type
+        assert alerts[0].severity == expected_severity
+
+
+# --- Per-cloud-account CPU/memory threshold overrides (Phase 20) --------------
+
+
+@pytest.fixture()
+def demo_cloud_account(db_session, demo_deployment_with_memory_limit):
+    account = CloudProviderAccount(
+        user_id=demo_deployment_with_memory_limit.microservice.project.owner_id,
+        provider="aws",
+        account_name="threshold-test-account",
+        region="us-east-1",
+        credentials_encrypted=encrypt_credentials({"access_key_id": "x", "secret_access_key": "y"}),
+    )
+    db_session.add(account)
+    db_session.commit()
+    db_session.refresh(account)
+    demo_deployment_with_memory_limit.cloud_provider_account_id = account.id
+    db_session.commit()
+    return account
+
+
+def test_custom_cpu_threshold_override_fires_where_the_global_default_would_not(
+    db_session, demo_deployment_with_memory_limit, demo_cloud_account
+):
+    """Global ALERT_CPU_WARNING_THRESHOLD is 60 - 45% CPU would not alert
+    under the default, but a custom, stricter override of 40 must."""
+    db_session.add(
+        CloudAccountAlertThreshold(cloud_provider_account_id=demo_cloud_account.id, cpu_warning_threshold=40.0)
+    )
+    db_session.commit()
+    db_session.add(
+        ResourceUsage(
+            deployment_id=demo_deployment_with_memory_limit.id,
+            cpu_usage_percent=45.0,
+            memory_usage_mb=100.0,
+            disk_usage_mb=1000.0,
+            network_in_kbps=50.0,
+            network_out_kbps=30.0,
+            recorded_at=datetime(2026, 7, 15, 12, 0, 0),
+        )
+    )
+    db_session.commit()
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alert = (
+        db_session.query(Alert)
+        .filter(Alert.deployment_id == demo_deployment_with_memory_limit.id, Alert.alert_type == "cpu_elevated")
+        .one()
+    )
+    assert alert.threshold_percent == 40.0
+
+
+def test_threshold_override_only_applies_the_overridden_tier_others_stay_default(
+    db_session, demo_deployment_with_memory_limit, demo_cloud_account
+):
+    """Only cpu_critical_threshold is overridden here - cpu_warning and
+    cpu_saturated must still fall back to the platform-wide defaults."""
+    db_session.add(
+        CloudAccountAlertThreshold(cloud_provider_account_id=demo_cloud_account.id, cpu_critical_threshold=70.0)
+    )
+    db_session.commit()
+    db_session.add(
+        ResourceUsage(
+            deployment_id=demo_deployment_with_memory_limit.id,
+            cpu_usage_percent=75.0,  # above the custom critical (70) but below default saturated (100)
+            memory_usage_mb=100.0,
+            disk_usage_mb=1000.0,
+            network_in_kbps=50.0,
+            network_out_kbps=30.0,
+            recorded_at=datetime(2026, 7, 15, 12, 0, 0),
+        )
+    )
+    db_session.commit()
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alert = (
+        db_session.query(Alert)
+        .filter(Alert.deployment_id == demo_deployment_with_memory_limit.id, Alert.alert_type == "cpu_high")
+        .one()
+    )
+    assert alert.threshold_percent == 70.0
+    assert alert.severity == "critical"
 
 
 def test_cpu_saturated_uses_highest_tier(db_session, demo_deployment, admin_user):

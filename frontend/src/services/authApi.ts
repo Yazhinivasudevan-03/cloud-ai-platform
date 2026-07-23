@@ -1,5 +1,5 @@
 import { httpClient } from "./httpClient";
-import type { TokenPair, User } from "@/types";
+import type { TokenPair, User, UserProfileUpdate } from "@/types";
 
 export interface RegisterPayload {
   username: string;
@@ -24,4 +24,7 @@ export const authApi = {
   },
 
   me: () => httpClient.get<User>("/auth/me").then((r) => r.data),
+
+  updateMe: (payload: UserProfileUpdate) =>
+    httpClient.patch<User>("/auth/me", payload).then((r) => r.data),
 };

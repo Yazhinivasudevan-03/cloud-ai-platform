@@ -1,7 +1,7 @@
 """Slack delivery via an Incoming Webhook.
 
-When `SLACK_WEBHOOK_URL` is unset, `send` logs instead of posting - see
-`email_notifier.py` for why that fallback exists.
+When no webhook URL is configured (globally or per-user), `send` logs
+instead of posting - see `email_notifier.py` for why that fallback exists.
 """
 import httpx
 
@@ -18,14 +18,17 @@ def _post(webhook_url: str, text: str) -> None:
     response.raise_for_status()
 
 
-def send_slack_message(text: str) -> bool:
+def send_slack_message(text: str, webhook_url: str | None = None) -> bool:
+    """`webhook_url` lets a caller (e.g. a per-user NotificationSetting,
+    Phase 20) override the platform-wide webhook configured in settings."""
     settings = get_settings()
-    if not settings.SLACK_WEBHOOK_URL:
+    webhook_url = webhook_url or settings.SLACK_WEBHOOK_URL
+    if not webhook_url:
         logger.info("Slack webhook not configured; would post: %s", text)
         return False
 
     try:
-        _post(settings.SLACK_WEBHOOK_URL, text)
+        _post(webhook_url, text)
     except Exception:
         # Retries (see app/utils/retry.py) are already exhausted by this
         # point - degrade gracefully rather than letting one flaky webhook

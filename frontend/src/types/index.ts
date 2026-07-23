@@ -39,9 +39,15 @@ export interface User {
   username: string;
   email: string;
   full_name: string | null;
+  phone_number: string | null;
   is_active: boolean;
   is_superuser: boolean;
   roles: Role[];
+}
+
+export interface UserProfileUpdate {
+  full_name?: string | null;
+  phone_number?: string | null;
 }
 
 export interface TokenPair {
@@ -295,4 +301,76 @@ export interface CloudProviderAccountUpdate {
   account_identifier?: string;
   credentials?: Record<string, string>;
   is_active?: boolean;
+}
+
+// --- Notification settings (Phase 20) ----------------------------------
+
+export interface NotificationSetting {
+  email_enabled: boolean;
+  sms_enabled: boolean;
+  telegram_enabled: boolean;
+  slack_enabled: boolean;
+  teams_enabled: boolean;
+  instant_alerts_enabled: boolean;
+  daily_summary_enabled: boolean;
+  alert_sound_enabled: boolean;
+  dnd_start_time: string | null; // "HH:MM:SS"
+  dnd_end_time: string | null;
+  timezone: string;
+  telegram_bot_token_configured: boolean;
+  telegram_chat_id_configured: boolean;
+  slack_webhook_configured: boolean;
+  teams_webhook_configured: boolean;
+}
+
+export interface NotificationSettingUpdate {
+  email_enabled?: boolean;
+  sms_enabled?: boolean;
+  telegram_enabled?: boolean;
+  slack_enabled?: boolean;
+  teams_enabled?: boolean;
+  instant_alerts_enabled?: boolean;
+  daily_summary_enabled?: boolean;
+  alert_sound_enabled?: boolean;
+  dnd_start_time?: string | null;
+  dnd_end_time?: string | null;
+  timezone?: string;
+  telegram_bot_token?: string;
+  telegram_chat_id?: string;
+  slack_webhook_url?: string;
+  teams_webhook_url?: string;
+}
+
+export interface NotificationSettingTestResult {
+  email_sent: boolean | null;
+  sms_sent: boolean | null;
+  telegram_sent: boolean | null;
+  slack_sent: boolean | null;
+}
+
+// --- Cloud account alert thresholds (Phase 20) -------------------------
+
+export interface CloudAccountAlertThreshold {
+  cloud_provider_account_id: number;
+  cpu_warning_threshold: number | null;
+  cpu_critical_threshold: number | null;
+  cpu_saturated_threshold: number | null;
+  memory_warning_threshold: number | null;
+  memory_critical_threshold: number | null;
+  memory_saturated_threshold: number | null;
+  effective_cpu_warning_threshold: number;
+  effective_cpu_critical_threshold: number;
+  effective_cpu_saturated_threshold: number;
+  effective_memory_warning_threshold: number;
+  effective_memory_critical_threshold: number;
+  effective_memory_saturated_threshold: number;
+}
+
+export interface CloudAccountAlertThresholdUpdate {
+  cpu_warning_threshold?: number | null;
+  cpu_critical_threshold?: number | null;
+  cpu_saturated_threshold?: number | null;
+  memory_warning_threshold?: number | null;
+  memory_critical_threshold?: number | null;
+  memory_saturated_threshold?: number | null;
 }

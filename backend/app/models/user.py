@@ -82,3 +82,6 @@ class User(TimestampMixin, Base):
     settings: Mapped[list["Setting"]] = relationship(
         "Setting", back_populates="user", cascade="all, delete-orphan"
     )
+    notification_setting: Mapped["NotificationSetting | None"] = relationship(
+        "NotificationSetting", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )

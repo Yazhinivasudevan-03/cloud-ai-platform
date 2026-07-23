@@ -8,10 +8,17 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.authentication.dependencies import get_current_active_user
+from app.controllers.cloud_account_alert_threshold_controller import (
+    CloudAccountAlertThresholdController,
+)
 from app.controllers.cloud_provider_account_controller import CloudProviderAccountController
 from app.database.session import get_db
 from app.models.user import User
 from app.schemas.alert import AlertRead
+from app.schemas.cloud_account_alert_threshold import (
+    CloudAccountAlertThresholdRead,
+    CloudAccountAlertThresholdUpdate,
+)
 from app.schemas.cloud_provider_account import (
     CloudAccountDeploymentSummary,
     CloudProviderAccountCreate,
@@ -148,3 +155,42 @@ def list_cloud_provider_account_alerts(
     current_user: User = Depends(get_current_active_user),
 ) -> list[AlertRead]:
     return CloudProviderAccountController(db).list_active_alerts(account_id, current_user.id)
+
+
+@router.get(
+    "/{account_id}/alert-thresholds",
+    response_model=CloudAccountAlertThresholdRead,
+    summary=(
+        "Get one of the current user's own cloud provider accounts' CPU/memory alert "
+        "threshold overrides (null fields fall back to the platform-wide default)"
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+    },
+)
+def get_cloud_provider_account_alert_thresholds(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CloudAccountAlertThresholdRead:
+    return CloudAccountAlertThresholdController(db).get(account_id, current_user.id)
+
+
+@router.put(
+    "/{account_id}/alert-thresholds",
+    response_model=CloudAccountAlertThresholdRead,
+    summary="Update one of the current user's own cloud provider accounts' CPU/memory alert threshold overrides",
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+        422: {"model": ErrorResponse, "description": "Thresholds are not in strictly ascending order"},
+    },
+)
+def update_cloud_provider_account_alert_thresholds(
+    account_id: int,
+    payload: CloudAccountAlertThresholdUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CloudAccountAlertThresholdRead:
+    return CloudAccountAlertThresholdController(db).update(account_id, current_user.id, payload)
