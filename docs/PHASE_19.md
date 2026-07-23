@@ -2,7 +2,7 @@
 
 Project: Cloud Usage Monitoring and AI-Driven Predictive Resource Optimization Platform for Microservices
 Phase: 19 (continuation of the "fix everything" audit roadmap work started in Phase 18)
-Status: **In progress** - items 9, 10, 11 complete; items 12-13 continue in later sections of this document
+Status: **In progress** - items 9, 10, 11, 12 complete; item 13 continues in a later section of this document
 
 ---
 
@@ -251,6 +251,98 @@ with a realistic Twilio-shaped request/response rather than hitting
 Twilio's real API (unlike AWS CloudWatch/Cost Explorer, Twilio has no
 widely-used local emulator equivalent to moto, so this is disclosed as a
 plain mock rather than an emulator-backed integration test).
+
+## 5. Item 12 — Frontend automated test suite
+
+### What was built
+
+The audit's Phase 7 report explicitly disclosed "zero frontend automated
+tests" as a real gap - the React SPA had only ever been verified manually.
+This closes it with **Vitest + React Testing Library**, chosen over
+Playwright/Cypress because the frontend already builds on Vite (Vitest
+shares its config, transform pipeline, and `@` path alias with zero
+duplicate setup) and the goal here is unit/component coverage of logic
+and rendering, not full browser end-to-end flows (Phase 7's own manual
+browser verification already covers that ground, and a real e2e suite
+would need a running backend + database in CI, a materially bigger lift
+than the audit item calls for).
+
+- `frontend/vite.config.ts` - `defineConfig` now imported from
+  `vitest/config` (a strict superset of Vite's own config type) with a
+  `test: { environment: "jsdom", setupFiles: [...] }` block added
+  alongside the existing build config - one config file, no duplication.
+- `frontend/src/test/setup.ts` (new) - imports
+  `@testing-library/jest-dom/vitest` (adds `toBeInTheDocument()` etc.
+  matchers) and registers an `afterEach(cleanup)` hook. That hook is not
+  optional: Vitest only auto-registers Testing Library's DOM cleanup
+  between tests when `test.globals: true` is set, which this project
+  deliberately does not use (every test file imports `describe`/`it`/
+  `expect`/`vi` explicitly from `"vitest"` rather than relying on
+  injected globals, avoiding any `eslint.config.js` changes) - found via
+  a real failing test (below), not assumed.
+- Four new test files, chosen for real value rather than to pad a count:
+  - `utils/formatters.test.ts` / `utils/statusColors.test.ts` - pure
+    function unit tests (percent/currency/megabyte formatting, title
+    casing, status-to-chip-color mapping) - fast, deterministic, and
+    exercise logic every page's rendering depends on.
+  - `components/ProtectedRoute.test.tsx` - the route guard that decides
+    whether the entire authenticated app is reachable at all: asserts
+    the loading spinner while auth state resolves, the redirect to
+    `/login` when unauthenticated, and that nested routes render when
+    authenticated - mocking `useAuth` and rendering real `react-router-dom`
+    `Routes` to verify actual navigation behaviour, not just prop values.
+  - `pages/LoginPage.test.tsx` - the actual login flow: fills in the
+    username/password fields via `@testing-library/user-event` (real
+    keystroke simulation, not `fireEvent`), submits, and asserts both the
+    success path (the mocked `login` is called with the right
+    credentials, navigation lands on the originally-requested page) and
+    the failure path (a rejected `login` renders the error alert and
+    does *not* navigate away).
+- `frontend/package.json` - new `"test": "vitest run"` script; new
+  devDependencies: `vitest`, `jsdom`, `@testing-library/react`,
+  `@testing-library/jest-dom`, `@testing-library/user-event`.
+- `.github/workflows/frontend-ci.yml` - new "Unit/component tests
+  (vitest)" step, between the existing lint and build steps.
+
+### A real bug, caught by an actual failing test, not by inspection
+
+The first full run of the new suite had 17/18 passing, with one genuine
+failure: `LoginPage`'s "shows an error message" test found `"Home page"`
+still present in the DOM - the successful-login test's rendered output
+from *the previous test* had leaked through, because Vitest does not
+auto-run Testing Library's cleanup between tests unless `test.globals:
+true` is set, which conflicts with this project's explicit-import
+convention for test files. Fixed by adding the `afterEach(cleanup)` hook
+in `src/test/setup.ts` described above. Re-ran: 18/18 passing.
+
+### Verification
+
+- `npm run test` (Vitest): **18/18 passing** locally.
+- `npm run lint` (eslint): clean - 0 errors (2 pre-existing warnings in
+  `AuthContext.tsx`/`ThemeModeContext.tsx`, both predating this phase and
+  unrelated to it).
+- `npm run build` (`tsc -b && vite build`): clean - the new test files
+  live under `src/` and are therefore type-checked by `tsc -b` as part of
+  the normal build (proving they're strictly typed, not loosely typed
+  throwaway scripts), while `vite build`'s own tree-shaking naturally
+  excludes them from the production bundle since nothing imports them.
+- Wired into `frontend-ci.yml` - will run on every push/PR touching
+  `frontend/**` going forward, alongside the existing lint/build steps.
+
+### Known limitations (disclosed)
+
+- **Component/unit coverage only, not full end-to-end** - these tests
+  render components in `jsdom` with mocked API modules; no test drives
+  the SPA against a real running backend in a real browser. Phase 7's
+  manual browser verification (disclosed there as a one-time, non-CI
+  check) remains the only end-to-end evidence the app works against the
+  real API.
+- **Four test files, not exhaustive coverage** - chosen to cover the
+  highest-value, most-reused logic (formatting/status-color utilities
+  used across nearly every page) and the single most security-critical
+  flow (the auth gate and login form), not every page/component in the
+  app. Extending coverage further is straightforward given the pattern
+  established here, but was not the audit's ask.
 
 ### A real bug, caught by an actual failed run, not by inspection
 

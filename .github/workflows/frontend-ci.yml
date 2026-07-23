@@ -1,9 +1,10 @@
 name: Frontend CI
 
-# Lints and builds the React/TypeScript SPA - no backend/database needed
-# since this only exercises the build toolchain (tsc + Vite), not runtime
-# behaviour. The full auth-flow-through-nginx verification (Phase 7 §8) is
-# a manual/local check, not something this workflow re-runs on every push.
+# Lints, tests, and builds the React/TypeScript SPA - no backend/database
+# needed, since Vitest + React Testing Library (Phase 19) test component
+# behaviour against mocked API modules, not a live backend. The full
+# auth-flow-through-nginx verification (Phase 7 section 8) is a
+# manual/local check, not something this workflow re-runs on every push.
 on:
   push:
     branches: [main]
@@ -36,6 +37,10 @@ jobs:
       - name: Lint (eslint)
         working-directory: frontend
         run: npm run lint
+
+      - name: Unit/component tests (vitest)
+        working-directory: frontend
+        run: npm run test
 
       - name: Type-check + build (tsc -b && vite build)
         working-directory: frontend
