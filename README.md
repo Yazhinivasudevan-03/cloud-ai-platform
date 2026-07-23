@@ -30,6 +30,44 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 | 18 | Production hardening: DB backup CronJob, self-signed TLS on Ingress, real audit logging, broadened rate limiting, NetworkPolicy, ML retraining schedule, LSTM-forecast-informed optimization | **Complete** - see [`docs/PHASE_18.md`](docs/PHASE_18.md) |
 | 19 | Production hardening continued: real AWS Cost Explorer billing sync (moto-tested, no live AWS account available - disclosed); CD pipeline (`helm upgrade`, built and documented but disabled pending a real cluster's `KUBE_CONFIG`); SMS notification channel (Twilio, self-service phone number via `PATCH /auth/me`); frontend automated tests (Vitest + React Testing Library, wired into CI); structured JSON logging + OpenTelemetry distributed tracing (live-verified, trace_id-correlated) | **Complete** - see [`docs/PHASE_19.md`](docs/PHASE_19.md) |
 
+## Known limitations (honestly disclosed, not glossed over)
+
+These are the specific gaps carried by real infrastructure/credentials
+that were not available in the environment this project was built in -
+each is written up in full in its own phase document, not just listed
+here as a bullet:
+
+- **No live AWS billing account** - the real AWS Cost Explorer
+  integration (`app/integrations/aws_cost_explorer.py`, Phase 19 item 9)
+  is verified against moto's Cost Explorer emulation only. moto has no
+  mechanism to be seeded with cost data at all (real AWS has no API to
+  inject billing data either - it's generated internally from actual
+  usage), so parsing-logic tests use a patched boto3 client with
+  realistic fixture responses instead of a live account's real numbers.
+- **No live Kubernetes cluster** - the CD pipeline
+  (`.github/workflows/cd-deploy.yml`, Phase 19 item 10) is genuinely
+  wired up (`helm upgrade --install` against the exact GHCR images
+  `docker-build.yml` just pushed) but stays disabled: its `deploy` job
+  only runs once a `KUBE_CONFIG` repository secret exists, and none is
+  configured. It has been verified via `helm lint`/`helm template` only -
+  the `deploy` job itself has never actually executed against a real
+  cluster.
+- **No live Twilio account** - the SMS notification channel
+  (`app/notifications/sms_notifier.py`, Phase 19 item 11) is verified
+  against a mocked `httpx.post` call shaped like a real Twilio request,
+  not a real delivered text message.
+- **No live OTLP collector** - distributed tracing
+  (`app/observability/tracing.py`, Phase 19 item 13) defaults to a
+  `ConsoleSpanExporter` (genuinely verified live against the running
+  `cloud-ai-backend` container - see `docs/PHASE_19.md` §6 for the
+  captured trace_id-correlated log/span pair) but the OTLP export path
+  to a real collector (Jaeger/Tempo/an OTel Collector) is verified only
+  via a mocked exporter-constructor call, not a real network export.
+
+See [`docs/PHASE_18.md`](docs/PHASE_18.md) and
+[`docs/PHASE_19.md`](docs/PHASE_19.md) for the full detail behind each of
+these, including what *was* verified and how.
+
 ## Repository layout
 
 ```
