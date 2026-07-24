@@ -182,3 +182,92 @@ def test_two_admins_with_different_personal_slack_webhooks_each_get_posted_to(
         "https://hooks.slack.example/personal-a",
         "https://hooks.slack.example/personal-b",
     }
+
+
+# --- Multi-timezone notification enrichment (Phase 22) -----------------------
+
+
+def test_email_body_unchanged_without_a_configured_deployment_timezone(db_session, demo_deployment):
+    """Regression: deployments with no linked cloud account timezone must
+    keep sending the exact same plain alert.message as before."""
+    admin = _make_admin(db_session, "dispatch_tz_off")
+    db_session.add(NotificationSetting(user_id=admin.id, email_enabled=True))
+    db_session.commit()
+    alert = _make_alert(db_session, demo_deployment.id)
+
+    with patch("app.notifications.dispatcher.send_email", return_value=True) as mock_email:
+        dispatch(db_session, alert)
+    db_session.commit()
+
+    mock_email.assert_called_once_with(admin.email, "[WARNING] cpu_elevated", "CPU is elevated")
+
+
+def test_email_and_slack_include_timezone_context_for_a_configured_deployment(
+    db_session, demo_deployment, monkeypatch
+):
+    """Phase 22 worked example: a CPU alert for a deployment linked to an
+    Asia/Kolkata (Mumbai) timezone entry includes Cloud Provider/Region/
+    Deployment/Timezone/local+UTC alert time in the outgoing email/Slack
+    text, without changing the core alert/message itself."""
+    from app.config.settings import get_settings
+    from app.models.cloud_account_timezone import CloudAccountTimezone
+    from app.models.cloud_provider_account import CloudProviderAccount
+    from app.utils.crypto import encrypt_credentials
+
+    monkeypatch.setattr(get_settings(), "SLACK_WEBHOOK_URL", "https://hooks.slack.example/shared")
+
+    account = CloudProviderAccount(
+        user_id=demo_deployment.microservice.project.owner_id,
+        provider="aws",
+        account_name="mumbai-account",
+        region="us-east-1",
+        credentials_encrypted=encrypt_credentials({"access_key_id": "x", "secret_access_key": "y"}),
+    )
+    db_session.add(account)
+    db_session.commit()
+    db_session.refresh(account)
+
+    timezone_entry = CloudAccountTimezone(
+        cloud_provider_account_id=account.id, region="ap-south-1", label="Mumbai", timezone="Asia/Kolkata",
+    )
+    db_session.add(timezone_entry)
+    db_session.commit()
+    db_session.refresh(timezone_entry)
+
+    demo_deployment.cloud_provider_account_id = account.id
+    demo_deployment.cloud_account_timezone_id = timezone_entry.id
+    db_session.commit()
+
+    admin = _make_admin(db_session, "dispatch_tz_on")
+    db_session.add(NotificationSetting(user_id=admin.id, email_enabled=True, slack_enabled=True))
+    db_session.commit()
+
+    alert = Alert(
+        deployment_id=demo_deployment.id, alert_type="cpu_elevated", severity="warning",
+        threshold_percent=60.0, message="CPU is elevated", status="active",
+        triggered_at=datetime(2026, 8, 15, 17, 35, 0),
+    )
+    db_session.add(alert)
+    db_session.commit()
+    db_session.refresh(alert)
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    with patch("app.notifications.dispatcher.send_email", return_value=True) as mock_email, patch(
+        "app.notifications.slack_notifier.httpx.post", return_value=mock_response
+    ) as mock_post:
+        dispatch(db_session, alert)
+    db_session.commit()
+
+    email_body = mock_email.call_args.args[2]
+    assert "CPU is elevated" in email_body
+    assert "Cloud Provider: aws" in email_body
+    assert "Region: ap-south-1" in email_body
+    assert "Deployment: dispatch-deploy" in email_body
+    assert "Timezone: Asia/Kolkata" in email_body
+    assert "Alert Time (Local): 2026-08-15 23:05 IST" in email_body
+    assert "Alert Time (UTC): 2026-08-15 17:35 UTC" in email_body
+
+    slack_text = mock_post.call_args.kwargs["json"]["text"]
+    assert "Asia/Kolkata" in slack_text
+    assert "Alert Time (Local): 2026-08-15 23:05 IST" in slack_text

@@ -31,9 +31,11 @@ import {
   YAxis,
 } from "recharts";
 import { PageHeader } from "@/components/PageHeader";
+import { AlertTimeCell } from "@/components/AlertTimeCell";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { StatusChip } from "@/components/StatusChip";
+import { TimeModeToggle, type TimeDisplayMode } from "@/components/TimeModeToggle";
 import { useAuth } from "@/contexts/AuthContext";
 import { deploymentsApi } from "@/services/deploymentsApi";
 import { metricsApi } from "@/services/metricsApi";
@@ -93,6 +95,7 @@ export function DeploymentDetailPage() {
 
 function OverviewTab({ deploymentId, memoryLimitMb }: { deploymentId: number; memoryLimitMb: number | null }) {
   const [ingestOpen, setIngestOpen] = useState(false);
+  const [timeMode, setTimeMode] = useState<TimeDisplayMode>("utc");
   const { hasRole } = useAuth();
 
   const usageQuery = useQuery({
@@ -109,16 +112,20 @@ function OverviewTab({ deploymentId, memoryLimitMb }: { deploymentId: number; me
     return [...rows]
       .reverse()
       .map((row) => ({
-        time: new Date(row.recorded_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit" }),
+        time:
+          timeMode === "local" && row.local_timestamp
+            ? row.local_timestamp
+            : new Date(row.recorded_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit" }),
         cpu: row.cpu_usage_percent,
         memory: row.memory_usage_mb,
         memoryPercent: memoryLimitMb ? (row.memory_usage_mb / memoryLimitMb) * 100 : null,
       }));
-  }, [usageQuery.data, memoryLimitMb]);
+  }, [usageQuery.data, memoryLimitMb, timeMode]);
 
   return (
     <Stack spacing={2}>
-      <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1 }}>
+        <TimeModeToggle mode={timeMode} onChange={setTimeMode} />
         {hasRole("operator", "admin") && (
           <Button startIcon={<AddIcon />} variant="outlined" onClick={() => setIngestOpen(true)}>
             Record resource usage
@@ -408,6 +415,7 @@ function CreatePodDialog({ deploymentId, open, onClose }: { deploymentId: number
 function AlertsTab({ deploymentId }: { deploymentId: number }) {
   const { hasRole } = useAuth();
   const queryClient = useQueryClient();
+  const [timeMode, setTimeMode] = useState<TimeDisplayMode>("utc");
   const query = useQuery({
     queryKey: ["alerts", "for-deployment", deploymentId],
     queryFn: () => alertsApi.listForDeployment(deploymentId, 1, 50),
@@ -420,7 +428,7 @@ function AlertsTab({ deploymentId }: { deploymentId: number }) {
   });
 
   const columns: DataTableColumn<AlertModel>[] = [
-    { header: "Triggered at", render: (a) => formatDateTime(a.triggered_at) },
+    { header: "Triggered at", render: (a) => <AlertTimeCell alert={a} mode={timeMode} /> },
     { header: "Type", render: (a) => a.alert_type },
     { header: "Severity", render: (a) => <StatusChip value={a.severity} /> },
     { header: "Message", render: (a) => a.message },
@@ -445,17 +453,22 @@ function AlertsTab({ deploymentId }: { deploymentId: number }) {
   ];
 
   return (
-    <DataTable
-      columns={columns}
-      rows={query.data?.items ?? []}
-      total={query.data?.meta.total ?? 0}
-      page={1}
-      pageSize={50}
-      onPageChange={() => {}}
-      onPageSizeChange={() => {}}
-      isLoading={query.isLoading}
-      emptyMessage="No alerts for this deployment."
-    />
+    <>
+      <Stack direction="row" justifyContent="flex-end" sx={{ mb: 1.5 }}>
+        <TimeModeToggle mode={timeMode} onChange={setTimeMode} />
+      </Stack>
+      <DataTable
+        columns={columns}
+        rows={query.data?.items ?? []}
+        total={query.data?.meta.total ?? 0}
+        page={1}
+        pageSize={50}
+        onPageChange={() => {}}
+        onPageSizeChange={() => {}}
+        isLoading={query.isLoading}
+        emptyMessage="No alerts for this deployment."
+      />
+    </>
   );
 }
 

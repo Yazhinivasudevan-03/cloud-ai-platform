@@ -1,11 +1,15 @@
+import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Box, Chip, Link, Paper, Stack, Typography } from "@mui/material";
 import { PageHeader } from "@/components/PageHeader";
+import { AlertTimeCell } from "@/components/AlertTimeCell";
 import { CloudAccountAlertThresholdsCard } from "@/components/CloudAccountAlertThresholdsCard";
+import { CloudAccountTimezonesCard } from "@/components/CloudAccountTimezonesCard";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { StatusChip } from "@/components/StatusChip";
+import { TimeModeToggle, type TimeDisplayMode } from "@/components/TimeModeToggle";
 import { cloudProviderAccountsApi } from "@/services/cloudProviderAccountsApi";
 import { formatDateTime, formatMegabytes, formatPercent } from "@/utils/formatters";
 import { providerLabel } from "@/utils/cloudProviders";
@@ -14,6 +18,7 @@ import type { Alert } from "@/types";
 export function CloudAccountDetailPage() {
   const { accountId } = useParams();
   const id = Number(accountId);
+  const [timeMode, setTimeMode] = useState<TimeDisplayMode>("utc");
 
   const accountQuery = useQuery({
     queryKey: ["cloud-provider-accounts", id],
@@ -29,7 +34,7 @@ export function CloudAccountDetailPage() {
   });
 
   const alertColumns: DataTableColumn<Alert>[] = [
-    { header: "Triggered at", render: (a) => formatDateTime(a.triggered_at) },
+    { header: "Triggered at", render: (a) => <AlertTimeCell alert={a} mode={timeMode} /> },
     { header: "Deployment", render: (a) => (a.deployment_id ? `#${a.deployment_id}` : "-") },
     { header: "Type", render: (a) => a.alert_type },
     { header: "Severity", render: (a) => <StatusChip value={a.severity} /> },
@@ -116,13 +121,18 @@ export function CloudAccountDetailPage() {
       </Paper>
 
       <Box sx={{ mb: 3 }}>
+        <CloudAccountTimezonesCard accountId={id} />
+      </Box>
+
+      <Box sx={{ mb: 3 }}>
         <CloudAccountAlertThresholdsCard accountId={id} />
       </Box>
 
       <Paper sx={{ p: 2.5 }}>
-        <Typography variant="h6" gutterBottom>
-          Active alerts for this account
-        </Typography>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" sx={{ mb: 1 }}>
+          <Typography variant="h6">Active alerts for this account</Typography>
+          <TimeModeToggle mode={timeMode} onChange={setTimeMode} />
+        </Stack>
         <ErrorAlert error={alertsQuery.error} />
         <DataTable
           columns={alertColumns}

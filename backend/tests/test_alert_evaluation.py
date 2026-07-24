@@ -553,6 +553,90 @@ def test_network_threshold_tiers(
         assert alerts[0].severity == expected_severity
 
 
+# --- Multi-timezone alert enrichment (Phase 22) ------------------------------
+
+
+def test_alert_has_null_timezone_fields_without_a_configured_deployment_timezone(
+    db_session, demo_deployment
+):
+    """Regression: alerts for deployments with no linked cloud account
+    timezone must keep behaving exactly as before - the new Phase 22
+    fields exist but are null."""
+    _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=65.0)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alert = db_session.query(Alert).filter(Alert.deployment_id == demo_deployment.id).one()
+    assert alert.alert_time_local is None
+    assert alert.deployment_timezone is None
+    assert alert.region is None
+    assert alert.provider is None
+    assert alert.alert_time_utc == alert.triggered_at
+
+
+def test_alert_surfaces_local_time_for_a_deployment_with_a_configured_timezone(
+    db_session, demo_deployment, admin_user
+):
+    """Phase 22 worked example: a CPU alert for a deployment linked to an
+    Azure UK South (Europe/London) timezone entry surfaces the alert time
+    in both UTC and BST, plus timezone/region/provider."""
+    account = CloudProviderAccount(
+        user_id=demo_deployment.microservice.project.owner_id,
+        provider="azure",
+        account_name="uk-south-account",
+        region="uksouth",
+        credentials_encrypted=encrypt_credentials({"access_key_id": "x", "secret_access_key": "y"}),
+    )
+    db_session.add(account)
+    db_session.commit()
+    db_session.refresh(account)
+
+    from app.models.cloud_account_timezone import CloudAccountTimezone
+
+    timezone_entry = CloudAccountTimezone(
+        cloud_provider_account_id=account.id,
+        region="uksouth",
+        label="UK South",
+        timezone="Europe/London",
+    )
+    db_session.add(timezone_entry)
+    db_session.commit()
+    db_session.refresh(timezone_entry)
+
+    demo_deployment.cloud_provider_account_id = account.id
+    demo_deployment.cloud_account_timezone_id = timezone_entry.id
+    db_session.commit()
+
+    db_session.add(
+        ResourceUsage(
+            deployment_id=demo_deployment.id,
+            cpu_usage_percent=65.0,
+            memory_usage_mb=500.0,
+            disk_usage_mb=1000.0,
+            network_in_kbps=50.0,
+            network_out_kbps=30.0,
+            recorded_at=datetime(2026, 8, 15, 17, 35, 0),
+        )
+    )
+    db_session.commit()
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alert = db_session.query(Alert).filter(Alert.deployment_id == demo_deployment.id).one()
+    # triggered_at is "now" at evaluation time (not the resource usage's own
+    # recorded_at), so assert self-consistency against the same conversion
+    # utility rather than a hardcoded instant - format_local/compute_utc_offset
+    # are exercised directly (and against a fixed DST-crossing date) in
+    # test_timezones.py already.
+    from app.utils.timezones import format_local
+
+    assert alert.alert_time_utc == alert.triggered_at
+    assert alert.alert_time_local == format_local(alert.triggered_at, "Europe/London")
+    assert alert.deployment_timezone == "Europe/London"
+    assert alert.region == "uksouth"
+    assert alert.provider == "azure"
+
+
 # --- Cost alerting (Phase 21 - project-scoped, not deployment-scoped) -------
 
 

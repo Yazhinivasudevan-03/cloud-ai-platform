@@ -4,6 +4,9 @@ import type {
   CloudAccountAlertThreshold,
   CloudAccountAlertThresholdUpdate,
   CloudAccountDeploymentSummary,
+  CloudAccountTimezone,
+  CloudAccountTimezoneCreate,
+  CloudAccountTimezoneUpdate,
   CloudProviderAccount,
   CloudProviderAccountCreate,
   CloudProviderAccountUpdate,
@@ -59,4 +62,22 @@ export const cloudProviderAccountsApi = {
     httpClient
       .put<CloudAccountAlertThreshold>(`/cloud-provider-accounts/${accountId}/alert-thresholds`, payload)
       .then((r) => r.data),
+
+  listTimezones: (accountId: number) =>
+    httpClient
+      .get<CloudAccountTimezone[]>(`/cloud-provider-accounts/${accountId}/timezones`)
+      .then((r) => r.data),
+
+  createTimezone: (accountId: number, payload: CloudAccountTimezoneCreate) =>
+    httpClient
+      .post<CloudAccountTimezone>(`/cloud-provider-accounts/${accountId}/timezones`, payload)
+      .then((r) => r.data),
+
+  updateTimezone: (accountId: number, timezoneId: number, payload: CloudAccountTimezoneUpdate) =>
+    httpClient
+      .put<CloudAccountTimezone>(`/cloud-provider-accounts/${accountId}/timezones/${timezoneId}`, payload)
+      .then((r) => r.data),
+
+  deleteTimezone: (accountId: number, timezoneId: number) =>
+    httpClient.delete(`/cloud-provider-accounts/${accountId}/timezones/${timezoneId}`).then(() => undefined),
 };

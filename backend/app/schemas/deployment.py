@@ -39,6 +39,14 @@ class DeploymentBase(BaseModel):
         max_length=200,
         description="Provider-specific resource ID this deployment maps to, e.g. an EC2 instance ID",
     )
+    cloud_account_timezone_id: int | None = Field(
+        default=None,
+        description=(
+            "Optional link to one of the linked cloud account's configured "
+            "(region, timezone) entries (Phase 22), so monitoring/alerts/"
+            "notifications for this deployment can display local time alongside UTC"
+        ),
+    )
 
 
 class DeploymentCreate(DeploymentBase):
@@ -57,6 +65,7 @@ class DeploymentUpdate(BaseModel):
     network_limit_kbps: float | None = Field(default=None, ge=0)
     cloud_provider_account_id: int | None = None
     cloud_resource_identifier: str | None = Field(default=None, max_length=200)
+    cloud_account_timezone_id: int | None = None
 
 
 class DeploymentRead(DeploymentBase):

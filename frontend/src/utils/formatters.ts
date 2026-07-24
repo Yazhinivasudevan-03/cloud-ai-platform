@@ -41,6 +41,15 @@ export function formatCurrency(value: number, currency = "USD"): string {
   return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value);
 }
 
+/** Renders a naive-UTC ISO string (e.g. "2026-08-15T17:35:00", no "Z"/offset
+ * - see backend/app/utils/timezones.py's convention) verbatim as "YYYY-MM-DD
+ * HH:MM UTC", never through `new Date(...)`, which would silently
+ * reinterpret it as the browser's own local time instead (Phase 22). */
+export function formatUtcLiteral(isoString: string): string {
+  const [datePart, timePart] = isoString.split("T");
+  return `${datePart} ${timePart?.slice(0, 5) ?? ""} UTC`;
+}
+
 export function titleCase(value: string): string {
   return value
     .split(/[_\s]+/)

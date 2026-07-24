@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
 from app.models.mixins import TimestampMixin
+from app.utils.timezones import format_local
 
 
 class Alert(TimestampMixin, Base):
@@ -39,3 +40,36 @@ class Alert(TimestampMixin, Base):
     notifications: Mapped[list["Notification"]] = relationship(
         "Notification", back_populates="alert", cascade="all, delete-orphan"
     )
+
+    @property
+    def alert_time_utc(self) -> datetime:
+        """Explicit alias for triggered_at (Phase 22), named to pair with
+        alert_time_local below in API responses."""
+        return self.triggered_at
+
+    @property
+    def _cloud_account_timezone(self):
+        return self.deployment.cloud_account_timezone if self.deployment else None
+
+    @property
+    def deployment_timezone(self) -> str | None:
+        tz_entry = self._cloud_account_timezone
+        return tz_entry.timezone if tz_entry else None
+
+    @property
+    def region(self) -> str | None:
+        tz_entry = self._cloud_account_timezone
+        return tz_entry.region if tz_entry else None
+
+    @property
+    def provider(self) -> str | None:
+        # Cost alerts (Phase 21) are project-scoped and have no deployment,
+        # so no timezone/region/provider is resolvable for them - fields
+        # stay null, same as any other deployment-less alert.
+        account = self.deployment.cloud_provider_account if self.deployment else None
+        return account.provider if account else None
+
+    @property
+    def alert_time_local(self) -> str | None:
+        tz_entry = self._cloud_account_timezone
+        return format_local(self.triggered_at, tz_entry.timezone) if tz_entry else None

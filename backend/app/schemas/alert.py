@@ -30,6 +30,18 @@ class AlertRead(BaseModel):
     resolved_at: datetime | None
     created_at: datetime
 
+    # Phase 22 - multi-timezone support. Populated only when the alert's
+    # deployment is linked to a configured cloud account timezone entry
+    # (project-scoped cost alerts and deployments without one configured
+    # keep these null - core alerting is unchanged).
+    alert_time_utc: datetime | None = None
+    alert_time_local: str | None = Field(
+        default=None, description="e.g. '2026-08-15 18:35 BST'"
+    )
+    deployment_timezone: str | None = Field(default=None, description="IANA identifier, e.g. 'Europe/London'")
+    region: str | None = None
+    provider: str | None = None
+
 
 class AlertEvaluationSummary(BaseModel):
     """Response for POST /alerts/evaluate - what the rule engine just did."""

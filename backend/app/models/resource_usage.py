@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
 from app.models.mixins import TimestampMixin
+from app.utils.timezones import format_local
 
 
 class ResourceUsage(TimestampMixin, Base):
@@ -28,3 +29,33 @@ class ResourceUsage(TimestampMixin, Base):
     deployment: Mapped["Deployment"] = relationship(
         "Deployment", back_populates="resource_usages"
     )
+
+    @property
+    def utc_timestamp(self) -> datetime:
+        """Explicit alias for recorded_at (Phase 22) - same naive-UTC value,
+        named to pair with local_timestamp below in API responses."""
+        return self.recorded_at
+
+    @property
+    def _cloud_account_timezone(self):
+        return self.deployment.cloud_account_timezone if self.deployment else None
+
+    @property
+    def deployment_timezone(self) -> str | None:
+        tz_entry = self._cloud_account_timezone
+        return tz_entry.timezone if tz_entry else None
+
+    @property
+    def region(self) -> str | None:
+        tz_entry = self._cloud_account_timezone
+        return tz_entry.region if tz_entry else None
+
+    @property
+    def provider(self) -> str | None:
+        account = self.deployment.cloud_provider_account if self.deployment else None
+        return account.provider if account else None
+
+    @property
+    def local_timestamp(self) -> str | None:
+        tz_entry = self._cloud_account_timezone
+        return format_local(self.recorded_at, tz_entry.timezone) if tz_entry else None

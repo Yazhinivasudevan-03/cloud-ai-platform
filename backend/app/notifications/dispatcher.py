@@ -39,6 +39,28 @@ from app.utils.logger import get_logger
 logger = get_logger("notifications.dispatcher")
 
 
+def _enrich_message(alert: Alert) -> str:
+    """Appends Cloud Provider/Region/Deployment/Timezone/local+UTC alert
+    time context (Phase 22) to the out-of-band notification text, only
+    when the alert's deployment is linked to a configured cloud account
+    timezone entry. Byte-identical to alert.message otherwise, so every
+    existing notification for a deployment without one configured (the
+    vast majority, pre-Phase-22) is completely unaffected."""
+    if not alert.deployment_timezone:
+        return alert.message
+    lines = [alert.message, ""]
+    if alert.provider:
+        lines.append(f"Cloud Provider: {alert.provider}")
+    if alert.region:
+        lines.append(f"Region: {alert.region}")
+    if alert.deployment is not None:
+        lines.append(f"Deployment: {alert.deployment.name}")
+    lines.append(f"Timezone: {alert.deployment_timezone}")
+    lines.append(f"Alert Time (Local): {alert.alert_time_local}")
+    lines.append(f"Alert Time (UTC): {alert.alert_time_utc.strftime('%Y-%m-%d %H:%M')} UTC")
+    return "\n".join(lines)
+
+
 def _admin_users(db: Session) -> list[User]:
     stmt = (
         select(User)
@@ -75,7 +97,8 @@ def dispatch(db: Session, alert: Alert) -> int:
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     subject = f"[{alert.severity.upper()}] {alert.alert_type}"
-    text = f"{subject}: {alert.message}"
+    enriched_message = _enrich_message(alert)
+    text = f"{subject}: {enriched_message}"
 
     setting_repository = NotificationSettingRepository(db)
     slack_delivered_by_webhook: dict[str, bool] = {}
@@ -98,7 +121,7 @@ def dispatch(db: Session, alert: Alert) -> int:
 
         creds = None  # decrypted lazily - most users have no per-user overrides at all
 
-        if setting.email_enabled and send_email(user.email, subject, alert.message):
+        if setting.email_enabled and send_email(user.email, subject, enriched_message):
             db.add(
                 Notification(
                     user_id=user.id, alert_id=alert.id, channel="email",

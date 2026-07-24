@@ -63,12 +63,26 @@ class Deployment(TimestampMixin, Base):
         "an AWS EC2 instance ID - required alongside cloud_provider_account_id "
         "for cloud metric syncing to be possible.",
     )
+    cloud_account_timezone_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("cloud_account_timezones.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Optional link to one of the linked cloud account's configured "
+        "(region, timezone) entries (Phase 22) - lets monitoring/alerts/"
+        "notifications for this deployment display local time alongside UTC. "
+        "Nullable and unset by default: existing deployments behave exactly "
+        "as before (UTC-only) until a user opts one into a configured timezone.",
+    )
 
     microservice: Mapped["Microservice"] = relationship(
         "Microservice", back_populates="deployments"
     )
     cloud_provider_account: Mapped["CloudProviderAccount | None"] = relationship(
         "CloudProviderAccount"
+    )
+    cloud_account_timezone: Mapped["CloudAccountTimezone | None"] = relationship(
+        "CloudAccountTimezone", back_populates="deployments"
     )
     pods: Mapped[list["Pod"]] = relationship(
         "Pod", back_populates="deployment", cascade="all, delete-orphan"

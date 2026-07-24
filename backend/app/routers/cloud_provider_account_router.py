@@ -11,6 +11,7 @@ from app.authentication.dependencies import get_current_active_user
 from app.controllers.cloud_account_alert_threshold_controller import (
     CloudAccountAlertThresholdController,
 )
+from app.controllers.cloud_account_timezone_controller import CloudAccountTimezoneController
 from app.controllers.cloud_provider_account_controller import CloudProviderAccountController
 from app.database.session import get_db
 from app.models.user import User
@@ -18,6 +19,11 @@ from app.schemas.alert import AlertRead
 from app.schemas.cloud_account_alert_threshold import (
     CloudAccountAlertThresholdRead,
     CloudAccountAlertThresholdUpdate,
+)
+from app.schemas.cloud_account_timezone import (
+    CloudAccountTimezoneCreate,
+    CloudAccountTimezoneRead,
+    CloudAccountTimezoneUpdate,
 )
 from app.schemas.cloud_provider_account import (
     CloudAccountDeploymentSummary,
@@ -194,3 +200,83 @@ def update_cloud_provider_account_alert_thresholds(
     current_user: User = Depends(get_current_active_user),
 ) -> CloudAccountAlertThresholdRead:
     return CloudAccountAlertThresholdController(db).update(account_id, current_user.id, payload)
+
+
+@router.get(
+    "/{account_id}/timezones",
+    response_model=list[CloudAccountTimezoneRead],
+    summary=(
+        "List one of the current user's own cloud provider accounts' configured deployment "
+        "timezones (Phase 22) - the same account can have resources across multiple "
+        "regions/timezones, e.g. an AWS account with both London and Mumbai deployments"
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+    },
+)
+def list_cloud_provider_account_timezones(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> list[CloudAccountTimezoneRead]:
+    return CloudAccountTimezoneController(db).list_for_account(account_id, current_user.id)
+
+
+@router.post(
+    "/{account_id}/timezones",
+    response_model=CloudAccountTimezoneRead,
+    status_code=201,
+    summary="Add a deployment timezone entry to one of the current user's own cloud provider accounts",
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+        409: {"model": ErrorResponse, "description": "This region/timezone combination already exists for this account"},
+        422: {"model": ErrorResponse, "description": "Not a valid IANA timezone identifier"},
+    },
+)
+def create_cloud_provider_account_timezone(
+    account_id: int,
+    payload: CloudAccountTimezoneCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CloudAccountTimezoneRead:
+    return CloudAccountTimezoneController(db).create(account_id, current_user.id, payload)
+
+
+@router.put(
+    "/{account_id}/timezones/{timezone_id}",
+    response_model=CloudAccountTimezoneRead,
+    summary="Update one of the current user's own cloud provider accounts' deployment timezone entries",
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account or timezone entry not found"},
+        422: {"model": ErrorResponse, "description": "Not a valid IANA timezone identifier"},
+    },
+)
+def update_cloud_provider_account_timezone(
+    account_id: int,
+    timezone_id: int,
+    payload: CloudAccountTimezoneUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CloudAccountTimezoneRead:
+    return CloudAccountTimezoneController(db).update(account_id, timezone_id, current_user.id, payload)
+
+
+@router.delete(
+    "/{account_id}/timezones/{timezone_id}",
+    status_code=204,
+    summary="Delete one of the current user's own cloud provider accounts' deployment timezone entries",
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account or timezone entry not found"},
+    },
+)
+def delete_cloud_provider_account_timezone(
+    account_id: int,
+    timezone_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> None:
+    CloudAccountTimezoneController(db).delete(account_id, timezone_id, current_user.id)

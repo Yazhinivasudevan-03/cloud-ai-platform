@@ -116,6 +116,7 @@ export interface Deployment {
   network_limit_kbps: number | null;
   cloud_provider_account_id: number | null;
   cloud_resource_identifier: string | null;
+  cloud_account_timezone_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -166,6 +167,13 @@ export interface ResourceUsage {
   network_out_kbps: number;
   recorded_at: string;
   created_at: string;
+  // Phase 22 - multi-timezone support. Null unless this metric's deployment
+  // is linked to a configured cloud account timezone entry.
+  utc_timestamp: string | null;
+  local_timestamp: string | null;
+  deployment_timezone: string | null;
+  region: string | null;
+  provider: string | null;
 }
 
 // --- AI output (read-only) ----------------------------------------------
@@ -220,6 +228,13 @@ export interface Alert {
   triggered_at: string;
   resolved_at: string | null;
   created_at: string;
+  // Phase 22 - multi-timezone support. Null unless this alert's deployment
+  // is linked to a configured cloud account timezone entry.
+  alert_time_utc: string | null;
+  alert_time_local: string | null;
+  deployment_timezone: string | null;
+  region: string | null;
+  provider: string | null;
 }
 
 export interface AlertEvaluationSummary {
@@ -415,4 +430,42 @@ export interface CloudAccountAlertThresholdUpdate {
   network_warning_threshold?: number | null;
   network_critical_threshold?: number | null;
   network_saturated_threshold?: number | null;
+}
+
+// --- Cloud account deployment timezones (Phase 22) ------------------------
+
+export interface CloudAccountTimezone {
+  id: number;
+  cloud_provider_account_id: number;
+  provider: string;
+  region: string;
+  availability_zone: string | null;
+  label: string;
+  timezone: string;
+  utc_offset: string;
+  current_local_time: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CloudAccountTimezoneCreate {
+  region: string;
+  availability_zone?: string | null;
+  label: string;
+  timezone: string;
+}
+
+export interface CloudAccountTimezoneUpdate {
+  region?: string;
+  availability_zone?: string | null;
+  label?: string;
+  timezone?: string;
+}
+
+export interface TimezoneValidationResult {
+  timezone: string;
+  valid: boolean;
+  utc_offset: string | null;
+  current_local_time: string | null;
+  error: string | null;
 }

@@ -42,3 +42,8 @@ class CloudProviderAccount(TimestampMixin, Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    timezones: Mapped[list["CloudAccountTimezone"]] = relationship(
+        "CloudAccountTimezone",
+        back_populates="cloud_provider_account",
+        cascade="all, delete-orphan",
+    )

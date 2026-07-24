@@ -160,6 +160,84 @@ def test_ingest_and_list_resource_usage(client, make_user_with_role):
     assert listed.json()["meta"]["total"] == 1
 
 
+def test_resource_usage_has_null_timezone_fields_without_a_configured_deployment_timezone(
+    client, make_user_with_role
+):
+    """Regression: existing deployments with no cloud account/timezone
+    configured must keep behaving exactly as before - the new Phase 22
+    fields are present but null, nothing else changes."""
+    token = make_user_with_role("operator_user", "operator")
+    deployment = _create_deployment(client, token)
+
+    created = client.post(
+        f"/api/v1/deployments/{deployment['id']}/resource-usage",
+        json={
+            "cpu_usage_percent": 55.5,
+            "memory_usage_mb": 1024.0,
+            "disk_usage_mb": 2048.0,
+            "network_in_kbps": 100.0,
+            "network_out_kbps": 50.0,
+            "recorded_at": "2026-07-15T12:00:00",
+        },
+        headers=_auth_header(token),
+    )
+    body = created.json()
+    assert body["local_timestamp"] is None
+    assert body["deployment_timezone"] is None
+    assert body["region"] is None
+    assert body["provider"] is None
+
+
+def test_resource_usage_surfaces_local_time_for_a_deployment_with_a_configured_timezone(
+    client, make_user_with_role
+):
+    """Phase 22 worked example: a deployment linked to an AWS Mumbai
+    (Asia/Kolkata) timezone entry surfaces UTC/local time, timezone,
+    region, and provider alongside every metric snapshot."""
+    token = make_user_with_role("operator_user", "operator")
+    deployment = _create_deployment(client, token)
+
+    account_id = client.post(
+        "/api/v1/cloud-provider-accounts",
+        json={
+            "provider": "aws",
+            "account_name": "mumbai-account",
+            "region": "us-east-1",
+            "credentials": {"access_key_id": "x", "secret_access_key": "y"},
+        },
+        headers=_auth_header(token),
+    ).json()["id"]
+    timezone_id = client.post(
+        f"/api/v1/cloud-provider-accounts/{account_id}/timezones",
+        json={"region": "ap-south-1", "label": "Mumbai", "timezone": "Asia/Kolkata"},
+        headers=_auth_header(token),
+    ).json()["id"]
+    client.put(
+        f"/api/v1/deployments/{deployment['id']}",
+        json={"cloud_provider_account_id": account_id, "cloud_account_timezone_id": timezone_id},
+        headers=_auth_header(token),
+    )
+
+    created = client.post(
+        f"/api/v1/deployments/{deployment['id']}/resource-usage",
+        json={
+            "cpu_usage_percent": 55.5,
+            "memory_usage_mb": 1024.0,
+            "disk_usage_mb": 2048.0,
+            "network_in_kbps": 100.0,
+            "network_out_kbps": 50.0,
+            "recorded_at": "2026-08-15T17:35:00",
+        },
+        headers=_auth_header(token),
+    )
+    body = created.json()
+    assert body["utc_timestamp"] == "2026-08-15T17:35:00"
+    assert body["local_timestamp"] == "2026-08-15 23:05 IST"
+    assert body["deployment_timezone"] == "Asia/Kolkata"
+    assert body["region"] == "ap-south-1"
+    assert body["provider"] == "aws"
+
+
 def test_ingest_resource_usage_rejects_negative_values(client, make_user_with_role):
     token = make_user_with_role("operator_user", "operator")
     deployment = _create_deployment(client, token)

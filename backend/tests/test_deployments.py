@@ -111,3 +111,108 @@ def test_invalid_status_value_rejected(client, make_user_with_role):
         headers=_auth_header(token),
     )
     assert response.status_code == 422
+
+
+def _create_cloud_account(client, token: str, account_name: str = "deploy-tz-account") -> int:
+    response = client.post(
+        "/api/v1/cloud-provider-accounts",
+        json={
+            "provider": "aws",
+            "account_name": account_name,
+            "region": "us-east-1",
+            "credentials": {"access_key_id": "x", "secret_access_key": "y"},
+        },
+        headers=_auth_header(token),
+    )
+    return response.json()["id"]
+
+
+def _create_account_timezone(client, token: str, account_id: int, region: str, timezone: str) -> int:
+    response = client.post(
+        f"/api/v1/cloud-provider-accounts/{account_id}/timezones",
+        json={"region": region, "label": region, "timezone": timezone},
+        headers=_auth_header(token),
+    )
+    return response.json()["id"]
+
+
+def test_create_deployment_with_cloud_account_timezone(client, make_user_with_role):
+    """Phase 22: a deployment may optionally link to one of its own cloud
+    account's configured (region, timezone) entries."""
+    token = make_user_with_role("operator_user", "operator")
+    microservice = _create_microservice(client, token)
+    account_id = _create_cloud_account(client, token)
+    timezone_id = _create_account_timezone(client, token, account_id, "eu-west-2", "Europe/London")
+
+    response = client.post(
+        f"/api/v1/microservices/{microservice['id']}/deployments",
+        json={
+            "name": "billing-deploy",
+            "cloud_provider_account_id": account_id,
+            "cloud_account_timezone_id": timezone_id,
+        },
+        headers=_auth_header(token),
+    )
+    assert response.status_code == 201
+    assert response.json()["cloud_account_timezone_id"] == timezone_id
+
+
+def test_create_deployment_rejects_timezone_from_a_different_account(client, make_user_with_role):
+    token = make_user_with_role("operator_user", "operator")
+    microservice = _create_microservice(client, token)
+    account_id = _create_cloud_account(client, token, "account-a")
+    other_account_id = _create_cloud_account(client, token, "account-b")
+    timezone_id = _create_account_timezone(client, token, other_account_id, "ap-south-1", "Asia/Kolkata")
+
+    response = client.post(
+        f"/api/v1/microservices/{microservice['id']}/deployments",
+        json={
+            "name": "billing-deploy",
+            "cloud_provider_account_id": account_id,
+            "cloud_account_timezone_id": timezone_id,
+        },
+        headers=_auth_header(token),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "TIMEZONE_ACCOUNT_MISMATCH"
+
+
+def test_update_deployment_to_add_a_cloud_account_timezone(client, make_user_with_role):
+    token = make_user_with_role("operator_user", "operator")
+    microservice = _create_microservice(client, token)
+    account_id = _create_cloud_account(client, token)
+    timezone_id = _create_account_timezone(client, token, account_id, "ap-south-1", "Asia/Kolkata")
+    deployment = client.post(
+        f"/api/v1/microservices/{microservice['id']}/deployments",
+        json={"name": "billing-deploy", "cloud_provider_account_id": account_id},
+        headers=_auth_header(token),
+    ).json()
+
+    response = client.put(
+        f"/api/v1/deployments/{deployment['id']}",
+        json={"cloud_account_timezone_id": timezone_id},
+        headers=_auth_header(token),
+    )
+    assert response.status_code == 200
+    assert response.json()["cloud_account_timezone_id"] == timezone_id
+
+
+def test_update_deployment_rejects_timezone_not_belonging_to_its_own_account(client, make_user_with_role):
+    token = make_user_with_role("operator_user", "operator")
+    microservice = _create_microservice(client, token)
+    account_id = _create_cloud_account(client, token, "account-c")
+    other_account_id = _create_cloud_account(client, token, "account-d")
+    timezone_id = _create_account_timezone(client, token, other_account_id, "eu-west-2", "Europe/London")
+    deployment = client.post(
+        f"/api/v1/microservices/{microservice['id']}/deployments",
+        json={"name": "billing-deploy", "cloud_provider_account_id": account_id},
+        headers=_auth_header(token),
+    ).json()
+
+    response = client.put(
+        f"/api/v1/deployments/{deployment['id']}",
+        json={"cloud_account_timezone_id": timezone_id},
+        headers=_auth_header(token),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "TIMEZONE_ACCOUNT_MISMATCH"

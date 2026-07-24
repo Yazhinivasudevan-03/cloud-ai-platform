@@ -2,11 +2,12 @@
 from sqlalchemy.orm import Session
 
 from app.models.deployment import Deployment
+from app.repositories.cloud_account_timezone_repository import CloudAccountTimezoneRepository
 from app.repositories.cloud_provider_account_repository import CloudProviderAccountRepository
 from app.repositories.deployment_repository import DeploymentRepository
 from app.repositories.microservice_repository import MicroserviceRepository
 from app.schemas.deployment import DeploymentCreate, DeploymentUpdate
-from app.utils.exceptions import ConflictError, ForbiddenError, NotFoundError
+from app.utils.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
 
 
 class DeploymentService:
@@ -15,6 +16,7 @@ class DeploymentService:
         self.repository = DeploymentRepository(db)
         self.microservice_repository = MicroserviceRepository(db)
         self.cloud_account_repository = CloudProviderAccountRepository(db)
+        self.cloud_account_timezone_repository = CloudAccountTimezoneRepository(db)
 
     def _get_microservice_or_404(self, microservice_id: int):
         microservice = self.microservice_repository.get_by_id(microservice_id)
@@ -44,6 +46,30 @@ class DeploymentService:
                 code="NOT_YOUR_CLOUD_ACCOUNT",
             )
 
+    def _check_timezone_belongs_to_account(
+        self, cloud_account_timezone_id: int, cloud_provider_account_id: int | None
+    ) -> None:
+        """A deployment's optional timezone link (Phase 22) must point at one
+        of the (region, timezone) entries configured on the SAME cloud
+        provider account the deployment is itself linked to - otherwise a
+        deployment could display, say, a Mumbai local time while actually
+        being linked to a different account's London-only credentials."""
+        timezone_entry = self.cloud_account_timezone_repository.get_by_id(cloud_account_timezone_id)
+        if timezone_entry is None:
+            raise NotFoundError(
+                f"Cloud account timezone {cloud_account_timezone_id} not found",
+                code="CLOUD_ACCOUNT_TIMEZONE_NOT_FOUND",
+            )
+        if (
+            cloud_provider_account_id is None
+            or timezone_entry.cloud_provider_account_id != cloud_provider_account_id
+        ):
+            raise ValidationAppError(
+                "cloud_account_timezone_id must belong to this deployment's own "
+                "cloud_provider_account_id",
+                code="TIMEZONE_ACCOUNT_MISMATCH",
+            )
+
     def create(
         self, microservice_id: int, payload: DeploymentCreate, current_user_id: int
     ) -> Deployment:
@@ -61,6 +87,10 @@ class DeploymentService:
             )
         if payload.cloud_provider_account_id is not None:
             self._check_cloud_account_ownership(payload.cloud_provider_account_id, current_user_id)
+        if payload.cloud_account_timezone_id is not None:
+            self._check_timezone_belongs_to_account(
+                payload.cloud_account_timezone_id, payload.cloud_provider_account_id
+            )
         deployment = Deployment(
             microservice_id=microservice_id,
             name=payload.name,
@@ -74,6 +104,7 @@ class DeploymentService:
             network_limit_kbps=payload.network_limit_kbps,
             cloud_provider_account_id=payload.cloud_provider_account_id,
             cloud_resource_identifier=payload.cloud_resource_identifier,
+            cloud_account_timezone_id=payload.cloud_account_timezone_id,
         )
         return self.repository.create(deployment)
 
@@ -140,6 +171,11 @@ class DeploymentService:
             deployment.cloud_provider_account_id = payload.cloud_provider_account_id
         if payload.cloud_resource_identifier is not None:
             deployment.cloud_resource_identifier = payload.cloud_resource_identifier
+        if payload.cloud_account_timezone_id is not None:
+            self._check_timezone_belongs_to_account(
+                payload.cloud_account_timezone_id, deployment.cloud_provider_account_id
+            )
+            deployment.cloud_account_timezone_id = payload.cloud_account_timezone_id
         self.db.commit()
         self.db.refresh(deployment)
         return deployment

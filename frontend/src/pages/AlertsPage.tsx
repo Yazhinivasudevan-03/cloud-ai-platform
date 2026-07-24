@@ -5,12 +5,13 @@ import Grid from "@mui/material/Grid2";
 import { Doughnut } from "react-chartjs-2";
 import "@/utils/chartSetup";
 import { PageHeader } from "@/components/PageHeader";
+import { AlertTimeCell } from "@/components/AlertTimeCell";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { StatusChip } from "@/components/StatusChip";
+import { TimeModeToggle, type TimeDisplayMode } from "@/components/TimeModeToggle";
 import { useAuth } from "@/contexts/AuthContext";
 import { alertsApi } from "@/services/alertsApi";
-import { formatDateTime } from "@/utils/formatters";
 import type { Alert, AlertSeverity, AlertStatus } from "@/types";
 
 const STATUS_OPTIONS: (AlertStatus | "")[] = ["", "active", "acknowledged", "resolved"];
@@ -23,6 +24,7 @@ export function AlertsPage() {
   const [pageSize, setPageSize] = useState(20);
   const [status, setStatus] = useState<AlertStatus | "">("active");
   const [severity, setSeverity] = useState<AlertSeverity | "">("");
+  const [timeMode, setTimeMode] = useState<TimeDisplayMode>("utc");
 
   const alertsQuery = useQuery({
     queryKey: ["alerts", "global", page, pageSize, status, severity],
@@ -70,7 +72,7 @@ export function AlertsPage() {
   );
 
   const columns: DataTableColumn<Alert>[] = [
-    { header: "Triggered at", render: (a) => formatDateTime(a.triggered_at) },
+    { header: "Triggered at", render: (a) => <AlertTimeCell alert={a} mode={timeMode} /> },
     { header: "Deployment", render: (a) => (a.deployment_id ? `#${a.deployment_id}` : "-") },
     { header: "Type", render: (a) => a.alert_type },
     { header: "Severity", render: (a) => <StatusChip value={a.severity} /> },
@@ -121,7 +123,8 @@ export function AlertsPage() {
         </Grid>
         <Grid size={{ xs: 12, md: 8 }}>
           <Paper sx={{ p: 2.5, height: "100%" }}>
-            <Stack direction="row" spacing={2}>
+            <Stack direction="row" spacing={2} flexWrap="wrap" alignItems="center">
+              <TimeModeToggle mode={timeMode} onChange={setTimeMode} />
               <TextField
                 select
                 label="Status"

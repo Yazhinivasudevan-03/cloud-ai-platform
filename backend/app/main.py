@@ -35,6 +35,7 @@ from app.routers import (
     pod_router,
     prediction_router,
     project_router,
+    timezone_router,
     user_router,
 )
 from app.scheduler import create_scheduler, shutdown_scheduler
@@ -101,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(optimization_router.router, prefix=settings.API_V1_PREFIX)
     app.include_router(cloud_cost_router.router, prefix=settings.API_V1_PREFIX)
     app.include_router(cloud_provider_account_router.router, prefix=settings.API_V1_PREFIX)
+    app.include_router(timezone_router.router, prefix=settings.API_V1_PREFIX)
 
     return app
 

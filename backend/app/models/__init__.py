@@ -9,6 +9,7 @@ from app.models.anomaly_detection import AnomalyDetection
 from app.models.api_key import ApiKey
 from app.models.audit_log import AuditLog
 from app.models.cloud_account_alert_threshold import CloudAccountAlertThreshold
+from app.models.cloud_account_timezone import CloudAccountTimezone
 from app.models.cloud_cost import CloudCost
 from app.models.cloud_provider_account import CloudProviderAccount
 from app.models.deployment import Deployment
@@ -32,6 +33,7 @@ __all__ = [
     "ApiKey",
     "AuditLog",
     "CloudAccountAlertThreshold",
+    "CloudAccountTimezone",
     "CloudCost",
     "CloudProviderAccount",
     "Deployment",
