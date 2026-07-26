@@ -203,20 +203,54 @@ evaluators had a genuine target. Via the real HTTP API against the live dev data
 
 ## 7. Verification Summary
 
-- Backend: **379/379 passing** (376 at the end of Phase 22 + new tests across 3 new
+- Backend: **389/389 passing** (376 at the end of Phase 22 + new tests across 3 new
   test files - `test_alert_preferences.py`, `test_prometheus_client.py`,
   `test_kubernetes_monitor.py` - plus substantial additions to `test_alert_evaluation.py`,
   `test_optimization_service.py`, `test_optimization_api.py`, `test_notification_dispatcher.py`,
-  `test_notification_settings_api.py`, `test_notifications_api.py`, and `test_auth.py`). Also
-  measurably *faster* than before this phase (~177s vs. ~326s for the same-shaped run earlier in
-  this phase) once the Prometheus-timeout bug in §5.1 was fixed.
+  `test_notification_settings_api.py`, `test_notifications_api.py`, `test_auth.py`, and
+  `test_notifiers.py` (§8's reason-code tests)). Also measurably *faster* than before this phase
+  (~177-192s vs. ~326s for the same-shaped run earlier in this phase) once the Prometheus-timeout
+  bug in §5.1 was fixed.
 - Frontend: 20/20 Vitest passing (unchanged count - this phase's frontend work was UI extensions
   verified via `tsc -b` type-checking and the live-verification pass above), `tsc -b` clean.
 - Live-verified against the real running stack and real dev database, as detailed in §6 - not
   simulated - including two real bugs (§5) that only live verification against real infrastructure
   could have caught.
 
-## 8. Known Limitations (disclosed)
+## 8. Follow-up: Granular Test-Notification Failure Reasons
+
+After this phase's main commit, a follow-up report came in: "Send Test Notification" showed
+`email: not configured / failed, sms: not configured / failed`. Investigation confirmed this is
+**correct, honest, disclosed behavior, not a defect** - this environment's `.env` genuinely has no
+real SMTP or Twilio credentials at all (checked directly: `SMTP_HOST=`, no `TWILIO_*` variables
+present anywhere), so there is nothing to actually deliver through. Real delivery requires the
+deployer's own real SMTP/Twilio credentials, which this platform cannot fabricate - the same class
+of external-dependency gap disclosed for AWS/Kubernetes access in earlier phases.
+
+What *was* a real, fixable gap: every notifier collapsed every failure mode - unconfigured, a
+genuine auth rejection, an unreachable server, an invalid recipient - into a single boolean, so the
+UI could only ever say "not configured / failed" regardless of which of those actually happened.
+Fixed by giving `email_notifier.py`/`sms_notifier.py`/`telegram_notifier.py`/`slack_notifier.py`
+each a `send_*_with_reason()` variant returning `(sent, reason)` with real, distinct reason codes
+(`not_configured`, `no_recipient`, `auth_failed`, `unreachable`, `invalid_recipient`, `failed`,
+`sent`) - never a guessed/fabricated one, only ever returned when the corresponding real
+condition/exception occurred (e.g. `smtplib.SMTPAuthenticationError` → `auth_failed`,
+`httpx.TransportError`/`ConnectionRefusedError` → `unreachable`). The original `send_email`/
+`send_sms`/etc. functions are now thin wrappers over these, so every other caller (the dispatcher,
+the alert/optimization evaluators) is completely unaffected - only `send_test_notification` was
+changed to use the reason-returning variants. `NotificationSettingTestResult` gained `*_reason`
+fields (email/secondary_email/sms/telegram/slack), and the Notification Settings page now shows a
+distinct success/warning row per channel with the real reason spelled out, instead of one
+collapsed sentence.
+
+Live-verified against the real running API: `POST /notification-settings/test` now returns
+`"email_reason": "not_configured"` (accurate for this environment) instead of a generic `false`.
+To see a real `"sent"`/`"auth_failed"`/`"unreachable"` in this environment, set real
+`SMTP_HOST`/`SMTP_USER`/`SMTP_PASSWORD`/`SMTP_FROM_ADDRESS` (or `TWILIO_ACCOUNT_SID`/
+`TWILIO_AUTH_TOKEN`/`TWILIO_FROM_NUMBER`) in `.env` and restart the backend - the code path is
+fully wired and tested; only real credentials are missing from this environment, not code.
+
+## 9. Known Limitations (disclosed)
 
 - **Node Failure/Container Failure require a kubeconfig mounted into the backend container** to
   activate against a real cluster in this `docker compose` topology - `docker-compose.yml` doesn't

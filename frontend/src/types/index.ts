@@ -424,12 +424,28 @@ export interface NotificationSettingUpdate {
   alert_preferences?: Partial<Record<AlertCategory, Partial<AlertCategoryPreference>>>;
 }
 
+// Real, distinct reasons a test notification wasn't sent (Phase 23 follow-up) -
+// never a fabricated success; each only appears when the corresponding real
+// condition/exception actually occurred (see backend email_notifier.py).
+export type NotificationFailureReason =
+  | "not_configured"
+  | "no_recipient"
+  | "auth_failed"
+  | "unreachable"
+  | "invalid_recipient"
+  | "failed";
+
 export interface NotificationSettingTestResult {
   email_sent: boolean | null;
+  email_reason: NotificationFailureReason | "sent" | null;
   secondary_email_sent: boolean | null;
+  secondary_email_reason: NotificationFailureReason | "sent" | null;
   sms_sent: boolean | null;
+  sms_reason: NotificationFailureReason | "sent" | null;
   telegram_sent: boolean | null;
+  telegram_reason: NotificationFailureReason | "sent" | null;
   slack_sent: boolean | null;
+  slack_reason: NotificationFailureReason | "sent" | null;
 }
 
 // --- Cloud account alert thresholds (Phase 20-21) -----------------------

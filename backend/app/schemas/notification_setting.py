@@ -90,7 +90,12 @@ class NotificationSettingRead(BaseModel):
 
 class NotificationSettingTestResult(BaseModel):
     email_sent: bool | None = None
+    email_reason: str | None = None
     secondary_email_sent: bool | None = None
+    secondary_email_reason: str | None = None
     sms_sent: bool | None = None
+    sms_reason: str | None = None
     telegram_sent: bool | None = None
+    telegram_reason: str | None = None
     slack_sent: bool | None = None
+    slack_reason: str | None = None

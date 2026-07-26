@@ -13,11 +13,11 @@ from unittest.mock import MagicMock, patch
 import httpx
 
 from app.config.settings import get_settings
-from app.notifications.email_notifier import send_email
-from app.notifications.slack_notifier import send_slack_message
-from app.notifications.sms_notifier import send_sms
+from app.notifications.email_notifier import send_email, send_email_with_reason
+from app.notifications.slack_notifier import send_slack_message, send_slack_message_with_reason
+from app.notifications.sms_notifier import send_sms, send_sms_with_reason
 from app.notifications.teams_notifier import send_teams_message
-from app.notifications.telegram_notifier import send_telegram_message
+from app.notifications.telegram_notifier import send_telegram_message, send_telegram_message_with_reason
 
 
 def test_send_email_returns_false_and_logs_when_unconfigured(monkeypatch):
@@ -377,3 +377,151 @@ def test_send_email_does_not_retry_authentication_failure(monkeypatch):
 
     assert result is False
     assert mock_smtp_cls.call_count == 1
+
+
+# --- Real, distinct failure reasons (Phase 23 follow-up) --------------------
+# Fixes the "Test Notification" result collapsing every failure into a
+# single generic "not configured / failed" - each reason below is only ever
+# returned when the corresponding real condition/exception actually happened.
+
+
+def test_send_email_with_reason_not_configured(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SMTP_HOST", "")
+
+    sent, reason = send_email_with_reason("someone@example.com", "subject", "body")
+
+    assert sent is False
+    assert reason == "not_configured"
+
+
+def test_send_email_with_reason_auth_failed(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.example.com")
+    monkeypatch.setattr(settings, "SMTP_USER", "user")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "wrong-password")
+    monkeypatch.setattr(settings, "SMTP_USE_TLS", False)
+
+    with patch(
+        "app.notifications.email_notifier.smtplib.SMTP",
+        side_effect=smtplib.SMTPAuthenticationError(535, b"Authentication failed"),
+    ):
+        sent, reason = send_email_with_reason("someone@example.com", "subject", "body")
+
+    assert sent is False
+    assert reason == "auth_failed"
+
+
+def test_send_email_with_reason_unreachable(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.example.com")
+    monkeypatch.setattr(settings, "SMTP_USER", "")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "")
+    monkeypatch.setattr(settings, "SMTP_USE_TLS", False)
+
+    with patch(
+        "app.notifications.email_notifier.smtplib.SMTP",
+        side_effect=ConnectionRefusedError("connection refused"),
+    ):
+        sent, reason = send_email_with_reason("someone@example.com", "subject", "body")
+
+    assert sent is False
+    assert reason == "unreachable"
+
+
+def test_send_email_with_reason_sent(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.example.com")
+    monkeypatch.setattr(settings, "SMTP_USER", "")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "")
+    monkeypatch.setattr(settings, "SMTP_USE_TLS", False)
+
+    mock_smtp_instance = MagicMock()
+    mock_smtp_context = MagicMock()
+    mock_smtp_context.__enter__.return_value = mock_smtp_instance
+    mock_smtp_context.__exit__.return_value = False
+
+    with patch("app.notifications.email_notifier.smtplib.SMTP", return_value=mock_smtp_context):
+        sent, reason = send_email_with_reason("someone@example.com", "subject", "body")
+
+    assert sent is True
+    assert reason == "sent"
+
+
+def test_send_sms_with_reason_not_configured(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "")
+    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "")
+
+    sent, reason = send_sms_with_reason("+14155552671", "hello")
+
+    assert sent is False
+    assert reason == "not_configured"
+
+
+def test_send_sms_with_reason_no_recipient(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
+    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+
+    sent, reason = send_sms_with_reason(None, "hello")
+
+    assert sent is False
+    assert reason == "no_recipient"
+
+
+def test_send_sms_with_reason_auth_failed(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "wrong-token")
+    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+
+    mock_response = MagicMock()
+    mock_response.status_code = 401
+    mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "Unauthorized", request=MagicMock(), response=mock_response
+    )
+
+    with patch("app.notifications.sms_notifier.httpx.post", return_value=mock_response):
+        sent, reason = send_sms_with_reason("+14155552671", "hello")
+
+    assert sent is False
+    assert reason == "auth_failed"
+
+
+def test_send_sms_with_reason_unreachable(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
+    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+
+    with patch(
+        "app.notifications.sms_notifier.httpx.post", side_effect=httpx.ConnectError("connection refused")
+    ):
+        sent, reason = send_sms_with_reason("+14155552671", "hello")
+
+    assert sent is False
+    assert reason == "unreachable"
+
+
+def test_send_slack_message_with_reason_not_configured(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SLACK_WEBHOOK_URL", "")
+
+    sent, reason = send_slack_message_with_reason("hello")
+
+    assert sent is False
+    assert reason == "not_configured"
+
+
+def test_send_telegram_message_with_reason_not_configured(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TELEGRAM_BOT_TOKEN", "")
+    monkeypatch.setattr(settings, "TELEGRAM_CHAT_ID", "")
+
+    sent, reason = send_telegram_message_with_reason("hello")
+
+    assert sent is False
+    assert reason == "not_configured"

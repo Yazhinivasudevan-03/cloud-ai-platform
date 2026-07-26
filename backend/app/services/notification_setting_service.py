@@ -6,10 +6,10 @@ from sqlalchemy.orm import Session
 from app.models.notification_setting import NotificationSetting
 from app.models.user import User
 from app.notifications.alert_preferences import load_preferences
-from app.notifications.email_notifier import send_email
-from app.notifications.slack_notifier import send_slack_message
-from app.notifications.sms_notifier import send_sms
-from app.notifications.telegram_notifier import send_telegram_message
+from app.notifications.email_notifier import send_email_with_reason
+from app.notifications.slack_notifier import send_slack_message_with_reason
+from app.notifications.sms_notifier import send_sms_with_reason
+from app.notifications.telegram_notifier import send_telegram_message_with_reason
 from app.repositories.notification_setting_repository import NotificationSettingRepository
 from app.schemas.notification_setting import (
     NotificationSettingRead,
@@ -118,17 +118,21 @@ class NotificationSettingService:
 
         result = NotificationSettingTestResult()
         if setting.email_enabled:
-            result.email_sent = send_email(user.email, "Test Notification", text)
+            result.email_sent, result.email_reason = send_email_with_reason(user.email, "Test Notification", text)
             if setting.secondary_email:
-                result.secondary_email_sent = send_email(setting.secondary_email, "Test Notification", text)
+                result.secondary_email_sent, result.secondary_email_reason = send_email_with_reason(
+                    setting.secondary_email, "Test Notification", text
+                )
         if setting.sms_enabled:
-            result.sms_sent = send_sms(user.phone_number, text)
+            result.sms_sent, result.sms_reason = send_sms_with_reason(user.phone_number, text)
         if setting.telegram_enabled:
-            result.telegram_sent = send_telegram_message(
+            result.telegram_sent, result.telegram_reason = send_telegram_message_with_reason(
                 text,
                 bot_token=creds.get("telegram_bot_token"),
                 chat_id=creds.get("telegram_chat_id"),
             )
         if setting.slack_enabled:
-            result.slack_sent = send_slack_message(text, webhook_url=creds.get("slack_webhook_url"))
+            result.slack_sent, result.slack_reason = send_slack_message_with_reason(
+                text, webhook_url=creds.get("slack_webhook_url")
+            )
         return result

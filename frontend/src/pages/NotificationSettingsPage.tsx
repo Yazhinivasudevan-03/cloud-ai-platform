@@ -76,6 +76,34 @@ const CATEGORY_LABELS: Record<AlertCategory, string> = {
   resource_optimization: "Resource Optimization",
 };
 
+const CHANNEL_LABELS: Record<"email" | "secondary_email" | "sms" | "telegram" | "slack", string> = {
+  email: "Email",
+  secondary_email: "Secondary email",
+  sms: "SMS",
+  telegram: "Telegram",
+  slack: "Slack",
+};
+
+// Mirrors the backend's real, distinct failure reasons (Phase 23 follow-up) -
+// never a fabricated message, only ever shown when the backend reported that
+// exact condition actually occurred.
+function describeFailureReason(reason: string | null | undefined): string {
+  switch (reason) {
+    case "not_configured":
+      return "not configured - add credentials for this channel above and save";
+    case "no_recipient":
+      return "no phone number on file";
+    case "auth_failed":
+      return "authentication failed - check the configured credentials";
+    case "unreachable":
+      return "the provider could not be reached";
+    case "invalid_recipient":
+      return "the provider rejected the recipient address/number";
+    default:
+      return "delivery failed";
+  }
+}
+
 export function NotificationSettingsPage() {
   const { user, refreshCurrentUser } = useAuth();
   const queryClient = useQueryClient();
@@ -527,18 +555,21 @@ export function NotificationSettingsPage() {
 
         <ErrorAlert error={testMutation.error} />
         {testMutation.data && (
-          <MuiAlert severity="info">
-            Test result -{" "}
-            {(["email", "secondary_email", "sms", "telegram", "slack"] as const)
-              .map((channel) => {
-                const key = `${channel}_sent` as const;
-                const value = testMutation.data[key];
-                if (value === null) return null;
-                return `${channel}: ${value ? "sent" : "not configured / failed"}`;
-              })
-              .filter(Boolean)
-              .join(", ") || "No channels are enabled."}
-          </MuiAlert>
+          <Stack spacing={1}>
+            {(["email", "secondary_email", "sms", "telegram", "slack"] as const).map((channel) => {
+              const sent = testMutation.data[`${channel}_sent` as const];
+              const reason = testMutation.data[`${channel}_reason` as const];
+              if (sent === null) return null;
+              return (
+                <MuiAlert key={channel} severity={sent ? "success" : "warning"}>
+                  {CHANNEL_LABELS[channel]}: {sent ? "sent successfully" : describeFailureReason(reason)}
+                </MuiAlert>
+              );
+            })}
+            {(["email", "secondary_email", "sms", "telegram", "slack"] as const).every(
+              (channel) => testMutation.data[`${channel}_sent` as const] === null,
+            ) && <MuiAlert severity="info">No channels are enabled.</MuiAlert>}
+          </Stack>
         )}
 
         <Typography variant="body2">

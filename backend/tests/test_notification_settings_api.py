@@ -135,12 +135,15 @@ def test_test_notification_sends_through_enabled_channels_only(client, make_user
     assert response.status_code == 200
     body = response.json()
     assert body["slack_sent"] is True
+    assert body["slack_reason"] == "sent"
     assert body["sms_sent"] is None  # disabled channel - never attempted
+    assert body["sms_reason"] is None
     assert body["telegram_sent"] is None
     # email_enabled defaults to True, so it's attempted - but SMTP isn't
     # configured in this test environment, so it's correctly False (logged,
-    # not sent), not None.
+    # not sent), not None. The reason is now specific, not a generic "failed".
     assert body["email_sent"] is False
+    assert body["email_reason"] == "not_configured"
     mock_slack_post.assert_called_once()
 
 
@@ -246,4 +249,6 @@ def test_test_notification_also_sends_to_secondary_email(client, make_user_with_
     assert response.status_code == 200
     body = response.json()
     assert body["email_sent"] is False  # SMTP not configured in this test env - logged, not sent
+    assert body["email_reason"] == "not_configured"
     assert body["secondary_email_sent"] is False  # attempted too, same reason
+    assert body["secondary_email_reason"] == "not_configured"
