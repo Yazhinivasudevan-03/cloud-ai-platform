@@ -1,4 +1,5 @@
-import { Chip, FormControlLabel, Paper, Stack, Switch, Typography } from "@mui/material";
+import { Link as RouterLink } from "react-router-dom";
+import { Chip, FormControlLabel, Link, Paper, Stack, Switch, Typography } from "@mui/material";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { useThemeMode } from "@/contexts/ThemeModeContext";
@@ -35,8 +36,12 @@ export function SettingsPage() {
             </Stack>
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: "block" }}>
-            Profile editing and password changes aren't available yet - the backend doesn't
-            expose those endpoints as of Phase 6. A future phase could add them.
+            Password changes aren't available yet. Your name, phone number, and other
+            notification-related contact details can be edited from{" "}
+            <Link component={RouterLink} to="/notification-settings">
+              Notification Settings
+            </Link>
+            .
           </Typography>
         </Paper>
 

@@ -82,6 +82,41 @@ def test_login_fails_with_invalid_password(client):
     assert response.json()["error"]["code"] == "INVALID_CREDENTIALS"
 
 
+def test_login_failure_records_an_audit_log_row_with_a_resolvable_user_id(client, db_session):
+    """Phase 23's Security evaluator counts failed logins per user_id -
+    the generic AuditLogMiddleware row has none (no authenticated "current
+    user" exists for a request that hasn't logged in yet), so
+    AuthService.authenticate() must write its own, more precise row for
+    any username that actually resolved to a real account."""
+    from app.models.audit_log import AuditLog
+
+    client.post("/api/v1/auth/register", json=_register_payload())
+    registered_user_id = db_session.query(User).filter(User.username == "jdoe").one().id
+
+    client.post("/api/v1/auth/login", data={"username": "jdoe", "password": "WrongPassword!"})
+
+    matching = (
+        db_session.query(AuditLog)
+        .filter(
+            AuditLog.action == "POST /api/v1/auth/login",
+            AuditLog.details == "status=401",
+            AuditLog.user_id == registered_user_id,
+        )
+        .all()
+    )
+    assert len(matching) >= 1
+
+
+def test_login_failure_for_unknown_username_does_not_error(client):
+    """No account to resolve a user_id from - must still return a normal
+    401, not raise trying to log an audit row for a nonexistent user."""
+    response = client.post(
+        "/api/v1/auth/login", data={"username": "totally-unknown-user", "password": "whatever"}
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_CREDENTIALS"
+
+
 def test_me_requires_authentication(client):
     response = client.get("/api/v1/auth/me")
     assert response.status_code == 401

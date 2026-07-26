@@ -1,8 +1,11 @@
 """Business logic for per-user notification preferences (Phase 20)."""
+import json
+
 from sqlalchemy.orm import Session
 
 from app.models.notification_setting import NotificationSetting
 from app.models.user import User
+from app.notifications.alert_preferences import load_preferences
 from app.notifications.email_notifier import send_email
 from app.notifications.slack_notifier import send_slack_message
 from app.notifications.sms_notifier import send_sms
@@ -28,6 +31,10 @@ _SIMPLE_FIELDS = (
     "dnd_start_time",
     "dnd_end_time",
     "timezone",
+    "secondary_email",
+    "country_code",
+    "telegram_username",
+    "notification_language",
 )
 
 
@@ -62,6 +69,11 @@ class NotificationSettingService:
             telegram_chat_id_configured=bool(creds.get("telegram_chat_id")),
             slack_webhook_configured=bool(creds.get("slack_webhook_url")),
             teams_webhook_configured=bool(creds.get("teams_webhook_url")),
+            secondary_email=setting.secondary_email,
+            country_code=setting.country_code,
+            telegram_username=setting.telegram_username,
+            notification_language=setting.notification_language,
+            alert_preferences=load_preferences(setting.alert_preferences),
         )
 
     def update(self, user_id: int, payload: NotificationSettingUpdate) -> NotificationSettingRead:
@@ -71,6 +83,11 @@ class NotificationSettingService:
         for field in _SIMPLE_FIELDS:
             if field in data:
                 setattr(setting, field, data[field])
+
+        if "alert_preferences" in data and data["alert_preferences"] is not None:
+            merged = load_preferences(setting.alert_preferences)
+            merged.update(data["alert_preferences"])
+            setting.alert_preferences = json.dumps(merged)
 
         if any(key in data for key in _CREDENTIAL_KEYS):
             creds = self.decrypt(setting)
@@ -102,6 +119,8 @@ class NotificationSettingService:
         result = NotificationSettingTestResult()
         if setting.email_enabled:
             result.email_sent = send_email(user.email, "Test Notification", text)
+            if setting.secondary_email:
+                result.secondary_email_sent = send_email(setting.secondary_email, "Test Notification", text)
         if setting.sms_enabled:
             result.sms_sent = send_sms(user.phone_number, text)
         if setting.telegram_enabled:

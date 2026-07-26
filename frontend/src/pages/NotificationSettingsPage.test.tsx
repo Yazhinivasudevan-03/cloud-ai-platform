@@ -6,7 +6,14 @@ import { describe, expect, it, vi } from "vitest";
 import { NotificationSettingsPage } from "./NotificationSettingsPage";
 import { notificationSettingsApi } from "@/services/notificationSettingsApi";
 import { useAuth } from "@/contexts/AuthContext";
-import type { NotificationSetting } from "@/types";
+import { SIMPLE_ALERT_CATEGORIES, TIERED_ALERT_CATEGORIES, type AlertCategoryPreference, type NotificationSetting } from "@/types";
+
+const DEFAULT_ALERT_PREFERENCES = Object.fromEntries(
+  [...TIERED_ALERT_CATEGORIES, ...SIMPLE_ALERT_CATEGORIES].map((category) => [
+    category,
+    { enabled: true, warning: true, critical: true, saturated: true } satisfies AlertCategoryPreference,
+  ]),
+) as NotificationSetting["alert_preferences"];
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -36,6 +43,11 @@ const DEFAULT_SETTINGS: NotificationSetting = {
   telegram_chat_id_configured: false,
   slack_webhook_configured: false,
   teams_webhook_configured: false,
+  secondary_email: null,
+  country_code: null,
+  telegram_username: null,
+  notification_language: "en",
+  alert_preferences: DEFAULT_ALERT_PREFERENCES,
 };
 
 function renderPage() {

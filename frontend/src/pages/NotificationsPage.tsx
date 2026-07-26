@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { PageHeader } from "@/components/PageHeader";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
+import { StatusChip } from "@/components/StatusChip";
 import { notificationsApi } from "@/services/notificationsApi";
 import { formatDateTime } from "@/utils/formatters";
 import type { Notification } from "@/types";
@@ -34,23 +35,35 @@ export function NotificationsPage() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["notifications"] }),
   });
 
+  const clearMutation = useMutation({
+    mutationFn: (id: number) => notificationsApi.remove(id),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+
   const columns: DataTableColumn<Notification>[] = [
     { header: "Received", render: (n) => formatDateTime(n.created_at) },
+    { header: "Severity", render: (n) => (n.severity ? <StatusChip value={n.severity} /> : "-") },
+    {
+      header: "Cloud / Region / Resource",
+      render: (n) => [n.provider, n.region, n.resource].filter(Boolean).join(" / ") || "-",
+    },
     { header: "Channel", render: (n) => n.channel },
     { header: "Message", render: (n) => <Typography variant="body2">{n.message}</Typography> },
     {
       header: "",
       align: "right",
-      render: (n) =>
-        n.is_read ? (
-          <Typography variant="caption" color="text.secondary">
-            Read
-          </Typography>
-        ) : (
-          <Button size="small" onClick={() => markReadMutation.mutate(n.id)}>
-            Mark read
+      render: (n) => (
+        <Stack direction="row" spacing={1} justifyContent="flex-end">
+          {!n.is_read && (
+            <Button size="small" onClick={() => markReadMutation.mutate(n.id)}>
+              Mark read
+            </Button>
+          )}
+          <Button size="small" color="error" onClick={() => clearMutation.mutate(n.id)}>
+            Clear
           </Button>
-        ),
+        </Stack>
+      ),
     },
   ];
 

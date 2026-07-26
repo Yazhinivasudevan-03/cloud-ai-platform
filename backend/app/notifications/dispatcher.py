@@ -27,6 +27,7 @@ from app.models.alert import Alert
 from app.models.notification import Notification
 from app.models.notification_setting import NotificationSetting
 from app.models.user import Role, User, user_roles
+from app.notifications.alert_preferences import load_preferences, wants_notification
 from app.notifications.email_notifier import send_email
 from app.notifications.slack_notifier import send_slack_message
 from app.notifications.sms_notifier import send_sms
@@ -119,6 +120,12 @@ def dispatch(db: Session, alert: Alert) -> int:
         if not setting.instant_alerts_enabled or _in_dnd_window(setting, now):
             continue
 
+        # Per-user alert-type/tier preferences (Phase 23) gate only these
+        # out-of-band channels - the dashboard entry above is never
+        # suppressed by them, matching the do-not-disturb precedent above.
+        if not wants_notification(load_preferences(setting.alert_preferences), alert.alert_type):
+            continue
+
         creds = None  # decrypted lazily - most users have no per-user overrides at all
 
         if setting.email_enabled and send_email(user.email, subject, enriched_message):
@@ -129,6 +136,10 @@ def dispatch(db: Session, alert: Alert) -> int:
                 )
             )
             created += 1
+            if setting.secondary_email:
+                # Best-effort - a secondary address is a convenience CC, not
+                # tracked as its own Notification row/channel.
+                send_email(setting.secondary_email, subject, enriched_message)
 
         if setting.sms_enabled and send_sms(user.phone_number, text):
             db.add(

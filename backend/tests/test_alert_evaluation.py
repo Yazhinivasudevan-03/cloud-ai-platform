@@ -2,7 +2,7 @@
 against the DB (not through the HTTP API) since it's triggered by the
 scheduler/POST /alerts/evaluate, not by a request body.
 """
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -14,7 +14,9 @@ from app.models.cloud_provider_account import CloudProviderAccount
 from app.models.deployment import Deployment
 from app.models.failure_prediction import FailurePrediction
 from app.models.microservice import Microservice
+from app.models.audit_log import AuditLog
 from app.models.notification import Notification
+from app.models.pod import Pod
 from app.models.project import Project
 from app.models.resource_usage import ResourceUsage
 from app.models.user import Role, User
@@ -637,6 +639,166 @@ def test_alert_surfaces_local_time_for_a_deployment_with_a_configured_timezone(
     assert alert.provider == "azure"
 
 
+# --- Storage alerting (Phase 23 - reuses disk_usage_mb/disk_limit_mb) ------
+
+
+def test_storage_alerting_is_skipped_without_a_configured_limit(db_session, demo_deployment):
+    _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=10.0, disk_usage_mb=950.0)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    assert db_session.query(Alert).filter(Alert.deployment_id == demo_deployment.id).count() == 0
+
+
+@pytest.mark.parametrize(
+    "disk_usage_mb,expected_alert_type,expected_severity",
+    [
+        (500.0, None, None),
+        (650.0, "storage_elevated", "warning"),
+        (850.0, "storage_high", "critical"),
+        (950.0, "storage_saturated", "critical"),
+    ],
+)
+def test_storage_threshold_tiers(
+    db_session, demo_deployment, disk_usage_mb, expected_alert_type, expected_severity
+):
+    """Storage deliberately fires alongside Disk from the same underlying
+    disk_usage_mb/disk_limit_mb data (see AlertEvaluationService's
+    docstring) - a real signal under its own alert_type, not a duplicate
+    data source."""
+    demo_deployment.disk_limit_mb = 1000.0
+    db_session.commit()
+    _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=10.0, disk_usage_mb=disk_usage_mb)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alerts = (
+        db_session.query(Alert)
+        .filter(Alert.deployment_id == demo_deployment.id, Alert.alert_type.like("storage_%"))
+        .all()
+    )
+    if expected_alert_type is None:
+        assert alerts == []
+    else:
+        assert len(alerts) == 1
+        assert alerts[0].alert_type == expected_alert_type
+        assert alerts[0].severity == expected_severity
+
+
+# --- Cloud Usage alerting (Phase 23 - aggregate across cpu/memory/disk/network) --
+
+
+def test_cloud_usage_alerting_is_skipped_with_only_cpu_configured(db_session, demo_deployment):
+    """With no memory/disk/network limit configured, Cloud Usage would be a
+    pure duplicate of the CPU alert - deliberately skipped rather than
+    firing a meaningless second copy."""
+    _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=95.0)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alerts = (
+        db_session.query(Alert)
+        .filter(Alert.deployment_id == demo_deployment.id, Alert.alert_type.like("cloud_usage_%"))
+        .all()
+    )
+    assert alerts == []
+
+
+def test_cloud_usage_takes_the_highest_of_the_configured_dimensions(db_session, demo_deployment):
+    demo_deployment.memory_limit_mb = 1000.0
+    demo_deployment.disk_limit_mb = 1000.0
+    db_session.commit()
+    db_session.add(
+        ResourceUsage(
+            deployment_id=demo_deployment.id,
+            cpu_usage_percent=10.0,  # low
+            memory_usage_mb=200.0,  # 20% - low
+            disk_usage_mb=920.0,  # 92% - the highest dimension
+            network_in_kbps=50.0,
+            network_out_kbps=30.0,
+            recorded_at=datetime(2026, 7, 15, 12, 0, 0),
+        )
+    )
+    db_session.commit()
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alert = (
+        db_session.query(Alert)
+        .filter(Alert.deployment_id == demo_deployment.id, Alert.alert_type.like("cloud_usage_%"))
+        .one()
+    )
+    assert alert.alert_type == "cloud_usage_saturated"  # 92% >= the 90% saturated default
+    assert alert.severity == "critical"
+
+
+# --- Pod Restart alerting (Phase 23 - reuses Pod.restart_count) ------------
+
+
+def test_pod_restart_alerting_is_skipped_with_no_pods_recorded(db_session, demo_deployment):
+    _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=10.0)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alerts = (
+        db_session.query(Alert)
+        .filter(Alert.deployment_id == demo_deployment.id, Alert.alert_type.like("pod_restart_%"))
+        .all()
+    )
+    assert alerts == []
+
+
+@pytest.mark.parametrize(
+    "restart_count,expected_alert_type,expected_severity",
+    [
+        (2, None, None),
+        (3, "pod_restart_elevated", "warning"),
+        (5, "pod_restart_high", "critical"),
+        (10, "pod_restart_saturated", "critical"),
+    ],
+)
+def test_pod_restart_threshold_tiers(
+    db_session, demo_deployment, restart_count, expected_alert_type, expected_severity
+):
+    db_session.add(
+        Pod(deployment_id=demo_deployment.id, pod_name="pod-a", status="running", restart_count=restart_count)
+    )
+    db_session.commit()
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alerts = (
+        db_session.query(Alert)
+        .filter(Alert.deployment_id == demo_deployment.id, Alert.alert_type.like("pod_restart_%"))
+        .all()
+    )
+    if expected_alert_type is None:
+        assert alerts == []
+    else:
+        assert len(alerts) == 1
+        assert alerts[0].alert_type == expected_alert_type
+        assert alerts[0].severity == expected_severity
+
+
+def test_pod_restart_uses_the_highest_restart_count_across_pods(db_session, demo_deployment):
+    db_session.add_all(
+        [
+            Pod(deployment_id=demo_deployment.id, pod_name="pod-a", status="running", restart_count=1),
+            Pod(deployment_id=demo_deployment.id, pod_name="pod-b", status="running", restart_count=7),
+        ]
+    )
+    db_session.commit()
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alert = (
+        db_session.query(Alert)
+        .filter(Alert.deployment_id == demo_deployment.id, Alert.alert_type.like("pod_restart_%"))
+        .one()
+    )
+    assert alert.alert_type == "pod_restart_high"  # 7 restarts -> critical tier (>=5, <10)
+
+
 # --- Cost alerting (Phase 21 - project-scoped, not deployment-scoped) -------
 
 
@@ -765,3 +927,172 @@ def test_custom_project_cost_threshold_override(db_session, demo_project):
     alert = db_session.query(Alert).filter(Alert.project_id == demo_project.id).one()
     assert alert.alert_type == "cost_elevated"
     assert alert.threshold_percent == 40.0
+
+
+# --- Security alerting (Phase 23 - reuses existing AuditLog rows) -----------
+
+
+@pytest.fixture()
+def demo_user(db_session):
+    user = User(
+        username="security_demo_user",
+        email="security_demo_user@example.com",
+        hashed_password="not-a-real-hash",
+        is_active=True,
+        is_superuser=False,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+def _add_failed_login(db_session, user_id: int, when: datetime):
+    db_session.add(
+        AuditLog(
+            user_id=user_id,
+            action="POST /api/v1/auth/login",
+            entity_type="auth",
+            details="status=401",
+            created_at=when,
+        )
+    )
+    db_session.commit()
+
+
+def test_security_alerting_is_skipped_below_the_warning_threshold(db_session, demo_user):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for _ in range(2):  # below the default warning threshold of 3
+        _add_failed_login(db_session, demo_user.id, now)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    assert db_session.query(Alert).filter(Alert.user_id == demo_user.id).count() == 0
+
+
+@pytest.mark.parametrize(
+    "failed_attempts,expected_alert_type,expected_severity",
+    [
+        (2, None, None),
+        (3, "security_elevated", "warning"),
+        (5, "security_high", "critical"),
+        (10, "security_saturated", "critical"),
+    ],
+)
+def test_security_threshold_tiers(
+    db_session, demo_user, failed_attempts, expected_alert_type, expected_severity
+):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for _ in range(failed_attempts):
+        _add_failed_login(db_session, demo_user.id, now)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alerts = db_session.query(Alert).filter(Alert.user_id == demo_user.id).all()
+    if expected_alert_type is None:
+        assert alerts == []
+    else:
+        assert len(alerts) == 1
+        assert alerts[0].alert_type == expected_alert_type
+        assert alerts[0].severity == expected_severity
+        assert alerts[0].deployment_id is None
+        assert alerts[0].project_id is None
+
+
+def test_security_alert_ignores_failed_logins_outside_the_rolling_window(db_session, demo_user):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    old = now - timedelta(minutes=30)  # outside the default 15-minute window
+    for _ in range(10):
+        _add_failed_login(db_session, demo_user.id, old)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    assert db_session.query(Alert).filter(Alert.user_id == demo_user.id).count() == 0
+
+
+def test_security_alert_resolves_once_failed_logins_age_out_of_the_window(db_session, demo_user):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for _ in range(5):
+        _add_failed_login(db_session, demo_user.id, now)
+    service = AlertEvaluationService(db_session)
+    summary = service.evaluate_all()
+    assert summary["alerts_created"] == 1
+
+    # Simulate time passing: age every recorded failed login out of the window.
+    db_session.query(AuditLog).filter(AuditLog.user_id == demo_user.id).update(
+        {"created_at": now - timedelta(minutes=30)}
+    )
+    db_session.commit()
+    summary = service.evaluate_all()
+
+    assert summary["alerts_resolved"] == 1
+    active = (
+        db_session.query(Alert)
+        .filter(Alert.user_id == demo_user.id, Alert.status == "active")
+        .all()
+    )
+    assert active == []
+
+
+# --- API Latency / Error Rate alerting (Phase 23 - queries real Prometheus) --
+
+
+def _platform_wide_alerts(db_session):
+    return (
+        db_session.query(Alert)
+        .filter(Alert.deployment_id.is_(None), Alert.project_id.is_(None), Alert.user_id.is_(None))
+        .all()
+    )
+
+
+def test_platform_metrics_skipped_when_prometheus_has_no_data(db_session, monkeypatch):
+    import app.services.alert_evaluation_service as svc
+
+    monkeypatch.setattr(svc, "average_latency_ms", lambda: None)
+    monkeypatch.setattr(svc, "error_rate_percent", lambda: None)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    assert _platform_wide_alerts(db_session) == []
+
+
+def test_api_latency_alert_fires_from_a_real_prometheus_reading(db_session, monkeypatch):
+    import app.services.alert_evaluation_service as svc
+
+    monkeypatch.setattr(svc, "average_latency_ms", lambda: 1500.0)  # above the 1000ms critical default
+    monkeypatch.setattr(svc, "error_rate_percent", lambda: None)
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alert = next(a for a in _platform_wide_alerts(db_session) if a.alert_type.startswith("api_latency_"))
+    assert alert.alert_type == "api_latency_high"
+    assert alert.severity == "critical"
+
+
+def test_error_rate_alert_fires_from_a_real_prometheus_reading(db_session, monkeypatch):
+    import app.services.alert_evaluation_service as svc
+
+    monkeypatch.setattr(svc, "average_latency_ms", lambda: None)
+    monkeypatch.setattr(svc, "error_rate_percent", lambda: 12.0)  # above the 10% saturated default
+
+    AlertEvaluationService(db_session).evaluate_all()
+
+    alert = next(a for a in _platform_wide_alerts(db_session) if a.alert_type.startswith("error_rate_"))
+    assert alert.alert_type == "error_rate_saturated"
+    assert alert.severity == "critical"
+
+
+def test_platform_metric_alert_resolves_once_back_under_threshold(db_session, monkeypatch):
+    import app.services.alert_evaluation_service as svc
+
+    monkeypatch.setattr(svc, "average_latency_ms", lambda: 1500.0)
+    monkeypatch.setattr(svc, "error_rate_percent", lambda: None)
+    service = AlertEvaluationService(db_session)
+    summary = service.evaluate_all()
+    assert summary["alerts_created"] == 1
+
+    monkeypatch.setattr(svc, "average_latency_ms", lambda: 100.0)  # comfortably below every tier
+    summary = service.evaluate_all()
+
+    assert summary["alerts_resolved"] == 1
+    assert [a for a in _platform_wide_alerts(db_session) if a.status == "active"] == []

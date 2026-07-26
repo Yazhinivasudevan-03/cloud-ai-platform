@@ -36,6 +36,40 @@ class AlertRepository(BaseRepository[Alert]):
         stmt = select(Alert).where(Alert.project_id == project_id, Alert.status == "active")
         return list(self.db.scalars(stmt).all())
 
+    def get_active_platform_wide(self, alert_type: str) -> Alert | None:
+        """For alert types with no deployment/project/user scope at all
+        (Phase 23 - API Latency/Error Rate, real HTTP server metrics with
+        no single owning entity)."""
+        stmt = select(Alert).where(
+            Alert.deployment_id.is_(None),
+            Alert.project_id.is_(None),
+            Alert.user_id.is_(None),
+            Alert.alert_type == alert_type,
+            Alert.status == "active",
+        )
+        return self.db.scalars(stmt).first()
+
+    def list_active_platform_wide(self) -> list[Alert]:
+        stmt = select(Alert).where(
+            Alert.deployment_id.is_(None),
+            Alert.project_id.is_(None),
+            Alert.user_id.is_(None),
+            Alert.status == "active",
+        )
+        return list(self.db.scalars(stmt).all())
+
+    def get_active_for_user(self, user_id: int, alert_type: str) -> Alert | None:
+        stmt = select(Alert).where(
+            Alert.user_id == user_id,
+            Alert.alert_type == alert_type,
+            Alert.status == "active",
+        )
+        return self.db.scalars(stmt).first()
+
+    def list_active_for_user(self, user_id: int) -> list[Alert]:
+        stmt = select(Alert).where(Alert.user_id == user_id, Alert.status == "active")
+        return list(self.db.scalars(stmt).all())
+
     def list_active_for_deployments(self, deployment_ids: list[int]) -> list[Alert]:
         """Every active alert across a set of deployments in one query -
         used to show a cloud provider account's alerts as a single list

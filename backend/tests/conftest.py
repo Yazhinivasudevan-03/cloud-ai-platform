@@ -23,6 +23,18 @@ os.environ["OTEL_ENABLED"] = "false"
 # assertions fail non-deterministically depending on host state. This is
 # a real bug this project's own test suite caught, not a hypothetical one.
 os.environ["OPTIMIZATION_AUTO_APPLY_ENABLED"] = "false"
+# AlertEvaluationService's API Latency/Error Rate evaluator (Phase 23)
+# queries this platform's own Prometheus instance on every evaluate_all()
+# call - real in normal `docker compose` use, but this test suite's MySQL-
+# only container has no Prometheus reachable at "prometheus:9090" (the
+# production default). Pointed at a closed local port instead of that
+# hostname so every one of this suite's many evaluate_all() calls fails
+# instantly (connection refused) rather than waiting out a real network
+# timeout per call - a real, measured slowdown this project's own test
+# suite caught (a single test file went from ~15s to several minutes),
+# not a hypothetical one. Prometheus-specific behavior itself is unit-
+# tested directly, with httpx mocked, in test_prometheus_client.py.
+os.environ["PROMETHEUS_URL"] = "http://127.0.0.1:1"
 
 import pytest
 from fastapi import Request

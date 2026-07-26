@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from app.config.settings import get_settings
+from app.models.alert import Alert
 from app.models.cloud_cost import CloudCost
 from app.models.deployment import Deployment
 from app.models.microservice import Microservice
@@ -434,6 +435,58 @@ def test_auto_apply_enabled_updates_deployment_memory_limit(
         .one()
     )
     assert memory_rec.status == "applied"
+
+
+# --- Resource Optimization alert wiring (Phase 23) --------------------------
+
+
+def test_pending_recommendation_creates_a_real_resource_optimization_alert(
+    db_session, demo_project_and_deployment
+):
+    _, deployment = demo_project_and_deployment
+    _add_usage(db_session, deployment.id, cpu=90.0, memory=500.0, hour=10)
+
+    summary = OptimizationService(db_session).evaluate_all()
+
+    assert summary["recommendations_created"] >= 1
+    alert = db_session.query(Alert).filter(
+        Alert.deployment_id == deployment.id, Alert.alert_type == "resource_optimization"
+    ).one()
+    assert alert.severity == "warning"
+    assert alert.status == "active"
+
+
+def test_resource_optimization_alert_is_not_duplicated_on_rerun(db_session, demo_project_and_deployment):
+    _, deployment = demo_project_and_deployment
+    _add_usage(db_session, deployment.id, cpu=90.0, memory=500.0, hour=10)
+    service = OptimizationService(db_session)
+    service.evaluate_all()
+
+    service.evaluate_all()  # nothing changed - must not create a second alert
+
+    alerts = db_session.query(Alert).filter(
+        Alert.deployment_id == deployment.id, Alert.alert_type == "resource_optimization"
+    ).all()
+    assert len(alerts) == 1
+
+
+def test_resource_optimization_alert_resolves_once_no_recommendations_are_pending(
+    db_session, demo_project_and_deployment
+):
+    _, deployment = demo_project_and_deployment
+    _add_usage(db_session, deployment.id, cpu=90.0, memory=500.0, hour=10)
+    service = OptimizationService(db_session)
+    service.evaluate_all()
+
+    # A comfortably mid-band reading clears every recommendation condition.
+    _add_usage(db_session, deployment.id, cpu=55.0, memory=500.0, hour=11)
+    service.evaluate_all()
+
+    alert = db_session.query(Alert).filter(
+        Alert.deployment_id == deployment.id, Alert.alert_type == "resource_optimization"
+    ).one()
+    assert alert.status == "resolved"
+    assert alert.resolved_at is not None
 
 
 def test_auto_apply_type_in_configured_set_but_without_a_target_never_applies(

@@ -142,3 +142,108 @@ def test_test_notification_sends_through_enabled_channels_only(client, make_user
     # not sent), not None.
     assert body["email_sent"] is False
     mock_slack_post.assert_called_once()
+
+
+# --- Personal contact info + alert preferences (Phase 23) -------------------
+
+
+def test_get_notification_settings_defaults_include_new_contact_and_preference_fields(
+    client, make_user_with_role
+):
+    token = make_user_with_role("notif_settings_f")
+
+    response = client.get("/api/v1/notification-settings", headers=_auth_header(token))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["secondary_email"] is None
+    assert body["country_code"] is None
+    assert body["telegram_username"] is None
+    assert body["notification_language"] == "en"
+    assert set(body["alert_preferences"].keys()) == {
+        "cpu", "memory", "disk", "network", "storage", "cloud_usage", "cloud_cost",
+        "api_latency", "error_rate", "pod_restart", "security",
+        "node_failure", "container_failure", "ai_prediction", "resource_optimization",
+    }
+    assert body["alert_preferences"]["cpu"] == {
+        "enabled": True, "warning": True, "critical": True, "saturated": True,
+    }
+
+
+def test_update_notification_settings_persists_contact_info(client, make_user_with_role):
+    token = make_user_with_role("notif_settings_g")
+
+    response = client.put(
+        "/api/v1/notification-settings",
+        json={
+            "secondary_email": "backup@example.com",
+            "country_code": "+44",
+            "telegram_username": "@jdoe",
+            "notification_language": "fr",
+        },
+        headers=_auth_header(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["secondary_email"] == "backup@example.com"
+    assert body["country_code"] == "+44"
+    assert body["telegram_username"] == "@jdoe"
+    assert body["notification_language"] == "fr"
+
+    get_response = client.get("/api/v1/notification-settings", headers=_auth_header(token))
+    assert get_response.json()["secondary_email"] == "backup@example.com"
+
+
+def test_update_notification_settings_rejects_an_invalid_secondary_email(client, make_user_with_role):
+    token = make_user_with_role("notif_settings_h")
+
+    response = client.put(
+        "/api/v1/notification-settings",
+        json={"secondary_email": "not-an-email"},
+        headers=_auth_header(token),
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_alert_preferences_partially_and_others_stay_at_default(client, make_user_with_role):
+    token = make_user_with_role("notif_settings_i")
+
+    response = client.put(
+        "/api/v1/notification-settings",
+        json={"alert_preferences": {"cpu": {"enabled": True, "warning": False, "critical": True, "saturated": True}}},
+        headers=_auth_header(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["alert_preferences"]["cpu"]["warning"] is False
+    assert body["alert_preferences"]["cpu"]["critical"] is True
+    assert body["alert_preferences"]["memory"]["enabled"] is True  # untouched category still defaults enabled
+    assert body["alert_preferences"]["node_failure"]["enabled"] is True
+
+    # A second, unrelated update must not clobber the first one's change.
+    second = client.put(
+        "/api/v1/notification-settings",
+        json={"alert_preferences": {"node_failure": {"enabled": False}}},
+        headers=_auth_header(token),
+    )
+    assert second.json()["alert_preferences"]["cpu"]["warning"] is False
+    assert second.json()["alert_preferences"]["node_failure"]["enabled"] is False
+
+
+def test_test_notification_also_sends_to_secondary_email(client, make_user_with_role):
+    token = make_user_with_role("notif_settings_j")
+    client.put(
+        "/api/v1/notification-settings",
+        json={"email_enabled": True, "secondary_email": "backup@example.com"},
+        headers=_auth_header(token),
+    )
+
+    response = client.post("/api/v1/notification-settings/test", headers=_auth_header(token))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["email_sent"] is False  # SMTP not configured in this test env - logged, not sent
+    assert body["secondary_email_sent"] is False  # attempted too, same reason

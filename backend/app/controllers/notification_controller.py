@@ -4,7 +4,7 @@ import math
 from sqlalchemy.orm import Session
 
 from app.schemas.common import PaginatedResponse, PaginationMeta
-from app.schemas.notification import NotificationRead
+from app.schemas.notification import NotificationRead, NotificationSummary
 from app.services.notification_service import NotificationService
 
 
@@ -28,3 +28,9 @@ class NotificationController:
         return NotificationRead.model_validate(
             self.service.mark_read(notification_id, current_user_id)
         )
+
+    def delete(self, notification_id: int, current_user_id: int) -> None:
+        self.service.delete(notification_id, current_user_id)
+
+    def summary(self, user_id: int) -> NotificationSummary:
+        return self.service.summary(user_id)

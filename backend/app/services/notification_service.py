@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.notification import Notification
 from app.repositories.notification_repository import NotificationRepository
+from app.schemas.notification import NotificationSummary
 from app.utils.exceptions import ForbiddenError, NotFoundError
 
 
@@ -20,6 +21,28 @@ class NotificationService:
         return self.repository.search(user_id, is_read, offset, page_size)
 
     def mark_read(self, notification_id: int, current_user_id: int) -> Notification:
+        notification = self._get_owned_or_raise(notification_id, current_user_id)
+        if not notification.is_read:
+            notification.is_read = True
+            self.db.commit()
+            self.db.refresh(notification)
+        return notification
+
+    def delete(self, notification_id: int, current_user_id: int) -> None:
+        notification = self._get_owned_or_raise(notification_id, current_user_id)
+        self.repository.delete(notification)
+
+    def summary(self, user_id: int) -> NotificationSummary:
+        unread_total = self.repository.count_unread_dashboard(user_id)
+        by_severity = self.repository.count_unread_by_severity(user_id)
+        return NotificationSummary(
+            unread_total=unread_total,
+            critical_count=by_severity.get("critical", 0),
+            warning_count=by_severity.get("warning", 0),
+            info_count=by_severity.get("info", 0),
+        )
+
+    def _get_owned_or_raise(self, notification_id: int, current_user_id: int) -> Notification:
         notification = self.repository.get_by_id(notification_id)
         if notification is None:
             raise NotFoundError(
@@ -27,10 +50,6 @@ class NotificationService:
             )
         if notification.user_id != current_user_id:
             raise ForbiddenError(
-                "Cannot mark another user's notification as read", code="NOT_YOUR_NOTIFICATION"
+                "Cannot access another user's notification", code="NOT_YOUR_NOTIFICATION"
             )
-        if not notification.is_read:
-            notification.is_read = True
-            self.db.commit()
-            self.db.refresh(notification)
         return notification

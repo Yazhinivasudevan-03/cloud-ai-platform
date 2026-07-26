@@ -1,5 +1,5 @@
 import { httpClient } from "./httpClient";
-import type { Notification, PaginatedResponse } from "@/types";
+import type { Notification, NotificationSummary, PaginatedResponse } from "@/types";
 
 export const notificationsApi = {
   listMine: (page = 1, pageSize = 20, isRead?: boolean) =>
@@ -9,6 +9,11 @@ export const notificationsApi = {
       })
       .then((r) => r.data),
 
+  summary: () => httpClient.get<NotificationSummary>("/notifications/summary").then((r) => r.data),
+
   markRead: (notificationId: number) =>
     httpClient.patch<Notification>(`/notifications/${notificationId}/read`).then((r) => r.data),
+
+  remove: (notificationId: number) =>
+    httpClient.delete(`/notifications/${notificationId}`).then(() => undefined),
 };

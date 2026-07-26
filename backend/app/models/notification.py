@@ -29,3 +29,41 @@ class Notification(TimestampMixin, Base):
 
     user: Mapped["User"] = relationship("User", back_populates="notifications")
     alert: Mapped["Alert"] = relationship("Alert", back_populates="notifications")
+
+    # Phase 23: surfaces the same alert context the Notification Bell/history
+    # need (severity, provider, region, resource, local+UTC alert time) by
+    # reading straight through to the already-computed Alert properties
+    # (Phase 22) - never re-derived, so there is exactly one source of truth.
+    @property
+    def severity(self) -> str | None:
+        return self.alert.severity if self.alert else None
+
+    @property
+    def alert_type(self) -> str | None:
+        return self.alert.alert_type if self.alert else None
+
+    @property
+    def provider(self) -> str | None:
+        return self.alert.provider if self.alert else None
+
+    @property
+    def region(self) -> str | None:
+        return self.alert.region if self.alert else None
+
+    @property
+    def resource(self) -> str | None:
+        if self.alert is None:
+            return None
+        if self.alert.deployment is not None:
+            return self.alert.deployment.name
+        if self.alert.project is not None:
+            return self.alert.project.name
+        return None
+
+    @property
+    def alert_time_utc(self):
+        return self.alert.alert_time_utc if self.alert else None
+
+    @property
+    def alert_time_local(self) -> str | None:
+        return self.alert.alert_time_local if self.alert else None

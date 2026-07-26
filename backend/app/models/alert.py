@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
 from app.models.mixins import TimestampMixin
+from app.models.user import AUTH_SCHEMA
 from app.utils.timezones import format_local
 
 
@@ -27,6 +28,16 @@ class Alert(TimestampMixin, Base):
     project_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True
     )
+    # Security alerts (Phase 23) are per-user, not deployment/project-scoped
+    # (a suspicious run of failed logins belongs to an account, not a
+    # deployment) - mirrors how Alert.project_id was added in Phase 21 for
+    # the same "this alert type needs a new scope" reason. Exactly one of
+    # deployment_id/project_id/user_id is set per alert in practice
+    # (enforced by AlertEvaluationService/OptimizationService, not a DB
+    # constraint).
+    user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey(f"{AUTH_SCHEMA}.users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     alert_type: Mapped[str] = mapped_column(String(50), nullable=False)
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
     threshold_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -37,6 +48,7 @@ class Alert(TimestampMixin, Base):
 
     deployment: Mapped["Deployment"] = relationship("Deployment", back_populates="alerts")
     project: Mapped["Project | None"] = relationship("Project", back_populates="alerts")
+    user: Mapped["User | None"] = relationship("User")
     notifications: Mapped[list["Notification"]] = relationship(
         "Notification", back_populates="alert", cascade="all, delete-orphan"
     )

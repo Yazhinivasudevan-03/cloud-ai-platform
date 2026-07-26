@@ -254,6 +254,22 @@ export interface Notification {
   is_read: boolean;
   sent_at: string | null;
   created_at: string;
+  // Phase 23 - alert context read through from the linked Alert; null for
+  // a notification with no alert_id or an alert with no resolvable value.
+  severity: AlertSeverity | null;
+  alert_type: string | null;
+  provider: string | null;
+  region: string | null;
+  resource: string | null;
+  alert_time_utc: string | null;
+  alert_time_local: string | null;
+}
+
+export interface NotificationSummary {
+  unread_total: number;
+  critical_count: number;
+  warning_count: number;
+  info_count: number;
 }
 
 // --- Optimization / cost -------------------------------------------------
@@ -344,6 +360,24 @@ export interface CloudProviderAccountUpdate {
 
 // --- Notification settings (Phase 20) ----------------------------------
 
+// The 5 tiered categories support per-tier (60/80/90%) checkboxes; the
+// other 4 are simple on/off - see backend app/notifications/alert_preferences.py.
+export const TIERED_ALERT_CATEGORIES = [
+  "cpu", "memory", "disk", "network", "storage", "cloud_usage", "cloud_cost",
+  "api_latency", "error_rate", "pod_restart", "security",
+] as const;
+export const SIMPLE_ALERT_CATEGORIES = [
+  "node_failure", "container_failure", "ai_prediction", "resource_optimization",
+] as const;
+export type AlertCategory = (typeof TIERED_ALERT_CATEGORIES)[number] | (typeof SIMPLE_ALERT_CATEGORIES)[number];
+
+export interface AlertCategoryPreference {
+  enabled: boolean;
+  warning: boolean;
+  critical: boolean;
+  saturated: boolean;
+}
+
 export interface NotificationSetting {
   email_enabled: boolean;
   sms_enabled: boolean;
@@ -360,6 +394,11 @@ export interface NotificationSetting {
   telegram_chat_id_configured: boolean;
   slack_webhook_configured: boolean;
   teams_webhook_configured: boolean;
+  secondary_email: string | null;
+  country_code: string | null;
+  telegram_username: string | null;
+  notification_language: string;
+  alert_preferences: Record<AlertCategory, AlertCategoryPreference>;
 }
 
 export interface NotificationSettingUpdate {
@@ -378,10 +417,16 @@ export interface NotificationSettingUpdate {
   telegram_chat_id?: string;
   slack_webhook_url?: string;
   teams_webhook_url?: string;
+  secondary_email?: string;
+  country_code?: string;
+  telegram_username?: string;
+  notification_language?: string;
+  alert_preferences?: Partial<Record<AlertCategory, Partial<AlertCategoryPreference>>>;
 }
 
 export interface NotificationSettingTestResult {
   email_sent: boolean | null;
+  secondary_email_sent: boolean | null;
   sms_sent: boolean | null;
   telegram_sent: boolean | null;
   slack_sent: boolean | null;

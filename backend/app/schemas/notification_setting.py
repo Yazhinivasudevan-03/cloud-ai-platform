@@ -6,9 +6,23 @@ overwrite them but can never read a previously stored secret back out.
 `NotificationSettingRead` instead reports a `*_configured` boolean per
 credential so the UI can show "already set" without exposing the value.
 """
+import re
 from datetime import time
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.notifications.alert_preferences import ALL_CATEGORIES, default_preferences
+
+_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class AlertCategoryPreference(BaseModel):
+    enabled: bool = True
+    # Ignored for the 4 simple (non-tiered) categories - see
+    # app/notifications/alert_preferences.py's SIMPLE_CATEGORIES.
+    warning: bool = True
+    critical: bool = True
+    saturated: bool = True
 
 
 class NotificationSettingUpdate(BaseModel):
@@ -32,6 +46,24 @@ class NotificationSettingUpdate(BaseModel):
     slack_webhook_url: str | None = None
     teams_webhook_url: str | None = None
 
+    # Personal contact info (Phase 23). Primary email/phone stay on User
+    # (see PATCH /auth/me) - these are the fields with no existing home.
+    secondary_email: str | None = Field(default=None, max_length=120)
+    country_code: str | None = Field(default=None, max_length=6)
+    telegram_username: str | None = Field(default=None, max_length=100)
+    notification_language: str | None = Field(default=None, min_length=2, max_length=10)
+    alert_preferences: dict[str, AlertCategoryPreference] | None = None
+
+    @field_validator("secondary_email")
+    @classmethod
+    def validate_secondary_email(cls, value: str | None) -> str | None:
+        # An explicit empty string clears the field (matches the
+        # credential-clearing convention above) - only a non-empty value
+        # is validated as looking like an email address.
+        if value and not _EMAIL_PATTERN.match(value):
+            raise ValueError("secondary_email must be a valid email address")
+        return value
+
 
 class NotificationSettingRead(BaseModel):
     email_enabled: bool
@@ -49,10 +81,16 @@ class NotificationSettingRead(BaseModel):
     telegram_chat_id_configured: bool
     slack_webhook_configured: bool
     teams_webhook_configured: bool
+    secondary_email: str | None
+    country_code: str | None
+    telegram_username: str | None
+    notification_language: str
+    alert_preferences: dict[str, AlertCategoryPreference] = Field(default_factory=default_preferences)
 
 
 class NotificationSettingTestResult(BaseModel):
     email_sent: bool | None = None
+    secondary_email_sent: bool | None = None
     sms_sent: bool | None = None
     telegram_sent: bool | None = None
     slack_sent: bool | None = None

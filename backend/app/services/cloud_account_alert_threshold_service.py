@@ -17,7 +17,7 @@ from app.schemas.cloud_account_alert_threshold import (
 )
 from app.utils.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 
-_METRICS = ("cpu", "memory", "disk", "network")
+_METRICS = ("cpu", "memory", "disk", "network", "cloud_usage", "pod_restart")
 _TIERS = ("warning", "critical", "saturated")
 _ALL_FIELDS = [f"{metric}_{tier}_threshold" for metric in _METRICS for tier in _TIERS]
 

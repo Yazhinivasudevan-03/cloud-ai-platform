@@ -17,12 +17,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config.settings import get_settings
+from app.models.alert import Alert
 from app.models.cloud_cost import CloudCost
 from app.models.deployment import Deployment
 from app.models.optimization_recommendation import OptimizationRecommendation
 from app.models.resource_usage import ResourceUsage
+from app.notifications.dispatcher import dispatch
 from app.optimization.cost_forecaster import aggregate_by_month
 from app.optimization.recommendation_engine import evaluate as evaluate_recommendations
+from app.repositories.alert_repository import AlertRepository
 from app.repositories.deployment_repository import DeploymentRepository
 from app.repositories.optimization_recommendation_repository import (
     OptimizationRecommendationRepository,
@@ -41,6 +44,7 @@ class OptimizationService:
         self.repository = OptimizationRecommendationRepository(db)
         self.deployment_repository = DeploymentRepository(db)
         self.prediction_repository = PredictionRepository(db)
+        self.alert_repository = AlertRepository(db)
         self.settings = get_settings()
 
     def get(self, recommendation_id: int) -> OptimizationRecommendation:
@@ -105,19 +109,59 @@ class OptimizationService:
         recommendations_created = 0
         recommendations_dismissed = 0
         recommendations_auto_applied = 0
+        notifications_sent = 0
 
         for deployment_id in deployment_ids:
             created, dismissed, auto_applied = self._evaluate_deployment(deployment_id)
             recommendations_created += created
             recommendations_dismissed += dismissed
             recommendations_auto_applied += auto_applied
+            notifications_sent += self._sync_resource_optimization_alert(deployment_id)
 
         return {
             "deployments_evaluated": len(deployment_ids),
             "recommendations_created": recommendations_created,
             "recommendations_dismissed": recommendations_dismissed,
             "recommendations_auto_applied": recommendations_auto_applied,
+            "notifications_sent": notifications_sent,
         }
+
+    def _sync_resource_optimization_alert(self, deployment_id: int) -> int:
+        """Resource Optimization (Phase 23): a real Alert (with real
+        notification dispatch) reflecting whatever this deployment's own
+        AI-driven recommendation engine (above) actually found - not a
+        second, independent evaluator. Mirrors AlertEvaluationService's
+        idempotent create/resolve lifecycle: one alert while at least one
+        recommendation is pending, resolved once none are."""
+        pending = self.repository.list_pending_for_deployment(deployment_id)
+        existing = self.alert_repository.get_active(deployment_id, "resource_optimization")
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        if not pending:
+            if existing is not None:
+                existing.status = "resolved"
+                existing.resolved_at = now
+                self.db.commit()
+            return 0
+
+        if existing is not None:
+            return 0  # already alerting - no-op, matches the no-duplicate-alert pattern elsewhere
+
+        types = ", ".join(sorted({r.recommendation_type for r in pending}))
+        alert = Alert(
+            deployment_id=deployment_id,
+            alert_type="resource_optimization",
+            severity="warning",
+            threshold_percent=None,
+            message=f"{len(pending)} resource optimization recommendation(s) pending ({types})",
+            status="active",
+            triggered_at=now,
+        )
+        self.db.add(alert)
+        self.db.flush()
+        notifications_sent = dispatch(self.db, alert)
+        self.db.commit()
+        return notifications_sent
 
     def _evaluate_deployment(self, deployment_id: int) -> tuple[int, int, int]:
         deployment = self.db.get(Deployment, deployment_id)

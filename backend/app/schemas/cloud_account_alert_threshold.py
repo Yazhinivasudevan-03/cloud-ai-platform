@@ -21,6 +21,13 @@ class CloudAccountAlertThresholdUpdate(BaseModel):
     network_warning_threshold: float | None = Field(default=None, ge=0, le=100)
     network_critical_threshold: float | None = Field(default=None, ge=0, le=100)
     network_saturated_threshold: float | None = Field(default=None, ge=0, le=100)
+    cloud_usage_warning_threshold: float | None = Field(default=None, ge=0, le=100)
+    cloud_usage_critical_threshold: float | None = Field(default=None, ge=0, le=100)
+    cloud_usage_saturated_threshold: float | None = Field(default=None, ge=0, le=100)
+    # pod_restart is a raw restart count, not a percent - no upper bound.
+    pod_restart_warning_threshold: float | None = Field(default=None, ge=0)
+    pod_restart_critical_threshold: float | None = Field(default=None, ge=0)
+    pod_restart_saturated_threshold: float | None = Field(default=None, ge=0)
 
 
 class CloudAccountAlertThresholdRead(BaseModel):
@@ -37,6 +44,12 @@ class CloudAccountAlertThresholdRead(BaseModel):
     network_warning_threshold: float | None
     network_critical_threshold: float | None
     network_saturated_threshold: float | None
+    cloud_usage_warning_threshold: float | None
+    cloud_usage_critical_threshold: float | None
+    cloud_usage_saturated_threshold: float | None
+    pod_restart_warning_threshold: float | None
+    pod_restart_critical_threshold: float | None
+    pod_restart_saturated_threshold: float | None
     # The values actually in effect right now - the override above, or the
     # platform-wide Settings default when unset - so the UI can show "60%
     # (default)" vs "70% (custom)" without duplicating the fallback logic.
@@ -52,3 +65,9 @@ class CloudAccountAlertThresholdRead(BaseModel):
     effective_network_warning_threshold: float
     effective_network_critical_threshold: float
     effective_network_saturated_threshold: float
+    effective_cloud_usage_warning_threshold: float
+    effective_cloud_usage_critical_threshold: float
+    effective_cloud_usage_saturated_threshold: float
+    effective_pod_restart_warning_threshold: float
+    effective_pod_restart_critical_threshold: float
+    effective_pod_restart_saturated_threshold: float

@@ -44,6 +44,22 @@ class CloudAccountAlertThreshold(TimestampMixin, Base):
     network_critical_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
     network_saturated_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Phase 23. cloud_usage is a percent, same shape as cpu/memory/disk/
+    # network - see AlertEvaluationService._cloud_usage_condition().
+    cloud_usage_warning_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cloud_usage_critical_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cloud_usage_saturated_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # pod_restart is a raw restart COUNT, not a percent (there is no natural
+    # "limit" to divide by) - the same override mechanism, a different unit.
+    pod_restart_warning_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pod_restart_critical_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pod_restart_saturated_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # storage deliberately has NO columns of its own - this platform collects
+    # no filesystem/volume metric distinct from disk_usage_mb, so "Storage"
+    # alerts reuse the disk_* columns above under a second alert_type label
+    # (see AlertEvaluationService._limit_based_condition's `metric` param) -
+    # disclosed in docs/PHASE_23.md rather than faking a second data source.
+
     cloud_provider_account: Mapped["CloudProviderAccount"] = relationship(
         "CloudProviderAccount", back_populates="alert_threshold"
     )

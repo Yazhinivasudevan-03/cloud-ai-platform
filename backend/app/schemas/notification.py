@@ -15,3 +15,23 @@ class NotificationRead(BaseModel):
     is_read: bool
     sent_at: datetime | None
     created_at: datetime
+    # Phase 23 - the same alert context the Notification Bell/history show,
+    # read through to the linked Alert; null for a notification with no
+    # alert_id, or whose alert resolves no timezone/deployment/project.
+    severity: str | None = None
+    alert_type: str | None = None
+    provider: str | None = None
+    region: str | None = None
+    resource: str | None = None
+    alert_time_utc: datetime | None = None
+    alert_time_local: str | None = None
+
+
+class NotificationSummary(BaseModel):
+    """Powers the Notification Bell (Phase 23): unread counts by severity,
+    plus the total unread count for the badge."""
+
+    unread_total: int
+    critical_count: int
+    warning_count: int
+    info_count: int

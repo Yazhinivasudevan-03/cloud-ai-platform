@@ -3,7 +3,9 @@ import { Link as RouterLink } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert as MuiAlert,
+  Box,
   Button,
+  Checkbox,
   Chip,
   Divider,
   FormControlLabel,
@@ -12,6 +14,12 @@ import {
   Paper,
   Stack,
   Switch,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
   Typography,
 } from "@mui/material";
@@ -20,7 +28,12 @@ import { ErrorAlert } from "@/components/ErrorAlert";
 import { useAuth } from "@/contexts/AuthContext";
 import { authApi } from "@/services/authApi";
 import { notificationSettingsApi } from "@/services/notificationSettingsApi";
-import type { NotificationSettingUpdate } from "@/types";
+import {
+  SIMPLE_ALERT_CATEGORIES,
+  TIERED_ALERT_CATEGORIES,
+  type AlertCategory,
+  type NotificationSettingUpdate,
+} from "@/types";
 
 const COMMON_TIMEZONES = [
   "UTC",
@@ -34,6 +47,35 @@ const COMMON_TIMEZONES = [
   "Australia/Sydney",
 ];
 
+const LANGUAGES = [
+  { value: "en", label: "English" },
+  { value: "es", label: "Spanish" },
+  { value: "fr", label: "French" },
+  { value: "de", label: "German" },
+  { value: "hi", label: "Hindi" },
+  { value: "pt", label: "Portuguese" },
+  { value: "ja", label: "Japanese" },
+  { value: "zh", label: "Chinese" },
+];
+
+const CATEGORY_LABELS: Record<AlertCategory, string> = {
+  cpu: "CPU",
+  memory: "Memory",
+  disk: "Disk",
+  network: "Network",
+  storage: "Storage",
+  cloud_usage: "Cloud Usage",
+  cloud_cost: "Cloud Cost",
+  api_latency: "API Latency",
+  error_rate: "Error Rate",
+  pod_restart: "Pod Restart",
+  security: "Security",
+  node_failure: "Node Failure",
+  container_failure: "Container Failure",
+  ai_prediction: "AI Prediction",
+  resource_optimization: "Resource Optimization",
+};
+
 export function NotificationSettingsPage() {
   const { user, refreshCurrentUser } = useAuth();
   const queryClient = useQueryClient();
@@ -45,10 +87,12 @@ export function NotificationSettingsPage() {
 
   const [form, setForm] = useState<NotificationSettingUpdate>({});
   const [phoneNumber, setPhoneNumber] = useState(user?.phone_number ?? "");
+  const [fullName, setFullName] = useState(user?.full_name ?? "");
 
   // Seed local form state once the real settings load - re-controlling
   // directly from query data would fight the user's own edits on refetch.
-  useEffect(() => {
+  // Also used by the Cancel button to discard unsaved edits.
+  const seedForm = () => {
     if (!settingsQuery.data) return;
     setForm({
       email_enabled: settingsQuery.data.email_enabled,
@@ -62,18 +106,34 @@ export function NotificationSettingsPage() {
       dnd_start_time: settingsQuery.data.dnd_start_time,
       dnd_end_time: settingsQuery.data.dnd_end_time,
       timezone: settingsQuery.data.timezone,
+      secondary_email: settingsQuery.data.secondary_email ?? "",
+      country_code: settingsQuery.data.country_code ?? "",
+      telegram_username: settingsQuery.data.telegram_username ?? "",
+      notification_language: settingsQuery.data.notification_language,
+      alert_preferences: settingsQuery.data.alert_preferences,
     });
-  }, [settingsQuery.data]);
-
-  useEffect(() => {
     setPhoneNumber(user?.phone_number ?? "");
-  }, [user?.phone_number]);
+    setFullName(user?.full_name ?? "");
+  };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(seedForm, [settingsQuery.data]);
 
   const set = <K extends keyof NotificationSettingUpdate>(key: K, value: NotificationSettingUpdate[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
-  const phoneMutation = useMutation({
-    mutationFn: () => authApi.updateMe({ phone_number: phoneNumber.trim() || null }),
+  const setCategoryPreference = (category: AlertCategory, field: "enabled" | "warning" | "critical" | "saturated", value: boolean) =>
+    setForm((prev) => ({
+      ...prev,
+      alert_preferences: {
+        ...prev.alert_preferences,
+        [category]: { ...prev.alert_preferences?.[category], [field]: value },
+      },
+    }));
+
+  const profileMutation = useMutation({
+    mutationFn: () =>
+      authApi.updateMe({ full_name: fullName.trim() || null, phone_number: phoneNumber.trim() || null }),
     onSuccess: () => void refreshCurrentUser(),
   });
 
@@ -114,34 +174,70 @@ export function NotificationSettingsPage() {
         subtitle="How and when you're alerted, per channel - see your full history on the Notifications page."
       />
 
-      <Stack spacing={2} maxWidth={640}>
+      <Stack spacing={2} maxWidth={760}>
         <Paper sx={{ p: 2.5 }}>
           <Typography variant="h6" gutterBottom>
             Contact info
           </Typography>
           <Stack spacing={2}>
-            <TextField label="Email" value={user?.email ?? ""} disabled fullWidth size="small" />
-            <Stack direction="row" spacing={1} alignItems="center">
+            <TextField
+              label="Full name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              fullWidth
+              size="small"
+            />
+            <TextField label="Primary email" value={user?.email ?? ""} disabled fullWidth size="small" />
+            <TextField
+              label="Secondary email (optional)"
+              placeholder="backup@example.com"
+              helperText="Also receives every alert email, in addition to your primary address"
+              value={form.secondary_email ?? ""}
+              onChange={(e) => set("secondary_email", e.target.value)}
+              fullWidth
+              size="small"
+            />
+            <Stack direction="row" spacing={1}>
+              <TextField
+                label="Country code"
+                placeholder="+44"
+                helperText="For display only"
+                value={form.country_code ?? ""}
+                onChange={(e) => set("country_code", e.target.value)}
+                sx={{ width: 140 }}
+                size="small"
+              />
               <TextField
                 label="Phone number"
                 placeholder="+14155552671"
-                helperText="E.164 format - required for SMS alerts"
+                helperText="E.164 format (incl. country code) - required for SMS alerts"
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 fullWidth
                 size="small"
               />
+            </Stack>
+            <TextField
+              label="Telegram username (optional)"
+              placeholder="@jdoe"
+              helperText="Informational - Telegram delivery itself uses the chat ID below"
+              value={form.telegram_username ?? ""}
+              onChange={(e) => set("telegram_username", e.target.value)}
+              fullWidth
+              size="small"
+            />
+            <Box>
               <Button
                 variant="outlined"
                 size="small"
-                loading={phoneMutation.isPending}
-                disabled={phoneNumber.trim() === (user?.phone_number ?? "")}
-                onClick={() => phoneMutation.mutate()}
+                loading={profileMutation.isPending}
+                disabled={fullName.trim() === (user?.full_name ?? "") && phoneNumber.trim() === (user?.phone_number ?? "")}
+                onClick={() => profileMutation.mutate()}
               >
-                Save
+                Save name &amp; phone
               </Button>
-            </Stack>
-            <ErrorAlert error={phoneMutation.error} />
+            </Box>
+            <ErrorAlert error={profileMutation.error} />
           </Stack>
         </Paper>
 
@@ -300,6 +396,21 @@ export function NotificationSettingsPage() {
               }
               label="Play a sound for new alerts in this browser"
             />
+            <TextField
+              select
+              label="Notification language"
+              helperText="Message templates are English-only today - saved, but not yet applied"
+              value={form.notification_language ?? "en"}
+              onChange={(e) => set("notification_language", e.target.value)}
+              size="small"
+              sx={{ maxWidth: 260, mt: 1 }}
+            >
+              {LANGUAGES.map((lang) => (
+                <MenuItem key={lang.value} value={lang.value}>
+                  {lang.label}
+                </MenuItem>
+              ))}
+            </TextField>
           </Stack>
         </Paper>
 
@@ -345,12 +456,69 @@ export function NotificationSettingsPage() {
           </Typography>
         </Paper>
 
+        <Paper sx={{ p: 2.5 }}>
+          <Typography variant="h6" gutterBottom>
+            Alert type preferences
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Choose what you want to receive email/SMS/Telegram/Slack/Teams notifications for. Your
+            in-app dashboard notifications above are never affected by these - only the outbound
+            pings. The 60/80/90% columns apply to the tiered categories; the rest are a simple
+            on/off.
+          </Typography>
+          <TableContainer sx={{ overflowX: "auto" }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Category</TableCell>
+                  <TableCell align="center">Enabled</TableCell>
+                  <TableCell align="center">60%</TableCell>
+                  <TableCell align="center">80%</TableCell>
+                  <TableCell align="center">90%</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {[...TIERED_ALERT_CATEGORIES, ...SIMPLE_ALERT_CATEGORIES].map((category) => {
+                  const pref = form.alert_preferences?.[category];
+                  const isTiered = (TIERED_ALERT_CATEGORIES as readonly string[]).includes(category);
+                  return (
+                    <TableRow key={category}>
+                      <TableCell>{CATEGORY_LABELS[category]}</TableCell>
+                      <TableCell align="center">
+                        <Checkbox
+                          size="small"
+                          checked={pref?.enabled ?? true}
+                          onChange={(e) => setCategoryPreference(category, "enabled", e.target.checked)}
+                        />
+                      </TableCell>
+                      {(["warning", "critical", "saturated"] as const).map((tier) => (
+                        <TableCell align="center" key={tier}>
+                          {isTiered && (
+                            <Checkbox
+                              size="small"
+                              checked={pref?.[tier] ?? true}
+                              onChange={(e) => setCategoryPreference(category, tier, e.target.checked)}
+                            />
+                          )}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+
         <ErrorAlert error={saveMutation.error} />
         {saveMutation.isSuccess && <MuiAlert severity="success">Saved.</MuiAlert>}
 
         <Stack direction="row" spacing={2}>
           <Button variant="contained" loading={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
             Save configuration
+          </Button>
+          <Button variant="outlined" onClick={seedForm}>
+            Cancel
           </Button>
           <Button variant="outlined" loading={testMutation.isPending} onClick={() => testMutation.mutate()}>
             Send test notification
@@ -361,7 +529,7 @@ export function NotificationSettingsPage() {
         {testMutation.data && (
           <MuiAlert severity="info">
             Test result -{" "}
-            {(["email", "sms", "telegram", "slack"] as const)
+            {(["email", "secondary_email", "sms", "telegram", "slack"] as const)
               .map((channel) => {
                 const key = `${channel}_sent` as const;
                 const value = testMutation.data[key];

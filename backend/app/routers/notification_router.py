@@ -8,7 +8,7 @@ from app.controllers.notification_controller import NotificationController
 from app.database.session import get_db
 from app.models.user import User
 from app.schemas.common import ErrorResponse, PaginatedResponse
-from app.schemas.notification import NotificationRead
+from app.schemas.notification import NotificationRead, NotificationSummary
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
@@ -28,6 +28,18 @@ def list_my_notifications(
     return NotificationController(db).list_for_user(current_user.id, is_read, page, page_size)
 
 
+@router.get(
+    "/summary",
+    response_model=NotificationSummary,
+    summary="Unread notification counts by severity, for the Notification Bell",
+)
+def get_notification_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> NotificationSummary:
+    return NotificationController(db).summary(current_user.id)
+
+
 @router.patch(
     "/{notification_id}/read",
     response_model=NotificationRead,
@@ -43,3 +55,20 @@ def mark_notification_read(
     current_user: User = Depends(get_current_active_user),
 ) -> NotificationRead:
     return NotificationController(db).mark_read(notification_id, current_user.id)
+
+
+@router.delete(
+    "/{notification_id}",
+    status_code=204,
+    summary="Clear (delete) one of the current user's own notifications",
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's notification"},
+        404: {"model": ErrorResponse, "description": "Notification not found"},
+    },
+)
+def delete_notification(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> None:
+    NotificationController(db).delete(notification_id, current_user.id)

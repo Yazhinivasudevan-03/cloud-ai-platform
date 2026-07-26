@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.authentication.jwt_handler import create_access_token, create_refresh_token, decode_token
 from app.authentication.jwt_handler import TokenType
 from app.authentication.password_handler import hash_password, verify_password
+from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.repositories.role_repository import RoleRepository
 from app.repositories.user_repository import UserRepository
@@ -49,6 +50,26 @@ class AuthService:
     def authenticate(self, username: str, password: str) -> User:
         user = self.user_repository.get_by_username(username)
         if user is None or not verify_password(password, user.hashed_password):
+            # AuditLogMiddleware's own generic row for this request has no
+            # user_id (there is no authenticated "current user" for a login
+            # request that hasn't succeeded yet - see app/middleware/
+            # audit_middleware.py) - so the Security evaluator (Phase 23)
+            # would never have a user to count failed attempts against
+            # without this: a second, more precise row, written here where
+            # the targeted account (if the username matched one) is
+            # actually known. Committed immediately, same as the
+            # middleware's own row, since this whole request is about to
+            # raise and roll back otherwise.
+            if user is not None:
+                self.db.add(
+                    AuditLog(
+                        user_id=user.id,
+                        action="POST /api/v1/auth/login",
+                        entity_type="auth",
+                        details="status=401",
+                    )
+                )
+                self.db.commit()
             raise UnauthorizedError("Incorrect username or password", code="INVALID_CREDENTIALS")
         if not user.is_active:
             raise UnauthorizedError("User account is inactive", code="INACTIVE_USER")

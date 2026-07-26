@@ -59,4 +59,30 @@ class NotificationSetting(TimestampMixin, Base):
     dnd_end_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="UTC")
 
+    # Personal contact info (Phase 23). Primary email/phone are NOT
+    # duplicated here - they stay on User (see module docstring); these are
+    # the fields that have no existing home on User.
+    secondary_email: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    country_code: Mapped[str | None] = mapped_column(
+        String(6),
+        nullable=True,
+        doc="Display-only split of User.phone_number's E.164 value (e.g. '+44') "
+        "so the form can show country code and local number as two fields - "
+        "the actual SMS-delivery value is still the single E.164 phone_number.",
+    )
+    telegram_username: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        doc="Informational only (e.g. '@jdoe') - Telegram delivery itself still "
+        "uses telegram_chat_id/telegram_bot_token below, which is what the Bot "
+        "API actually requires.",
+    )
+    notification_language: Mapped[str] = mapped_column(String(10), nullable=False, default="en")
+
+    # JSON-encoded per-category notification preferences (Phase 23) - see
+    # app/notifications/alert_preferences.py. Null means "use the default"
+    # (every category and tier enabled), preserving today's always-on
+    # behavior for every user who predates this column.
+    alert_preferences: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     user: Mapped["User"] = relationship("User", back_populates="notification_setting")

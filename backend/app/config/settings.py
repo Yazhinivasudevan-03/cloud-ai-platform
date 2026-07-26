@@ -101,6 +101,56 @@ class Settings(BaseSettings):
     ALERT_COST_SATURATED_THRESHOLD: float = 90.0
     ALERT_FAILURE_WARNING_THRESHOLD: float = 0.5
     ALERT_FAILURE_CRITICAL_THRESHOLD: float = 0.8
+    # Cloud Usage (Phase 23) - an aggregate of a deployment's own cpu/memory/
+    # disk/network utilization percentages (the max of whichever are
+    # computable for that deployment), same 3-tier shape as those metrics.
+    ALERT_CLOUD_USAGE_WARNING_THRESHOLD: float = 60.0
+    ALERT_CLOUD_USAGE_CRITICAL_THRESHOLD: float = 80.0
+    ALERT_CLOUD_USAGE_SATURATED_THRESHOLD: float = 90.0
+    # Pod Restart (Phase 23) - a raw restart count, not a percent (see
+    # Pod.restart_count, already collected, never alerted on before now).
+    ALERT_POD_RESTART_WARNING_THRESHOLD: float = 3.0
+    ALERT_POD_RESTART_CRITICAL_THRESHOLD: float = 5.0
+    ALERT_POD_RESTART_SATURATED_THRESHOLD: float = 10.0
+    # API Latency / Error Rate (Phase 23) - platform-wide HTTP server
+    # metrics (see app/integrations/prometheus_client.py), not scoped to a
+    # single cloud account the way CPU/memory/disk/network/cloud_usage/
+    # pod_restart are - a request path has no cloud-account owner, so these
+    # have no CloudAccountAlertThreshold override columns, only this
+    # platform-wide default (a deliberate, disclosed deviation - see
+    # docs/PHASE_23.md - the same reasoning Project.cost_* already
+    # established for why cost thresholds don't live on CloudAccountAlertThreshold).
+    ALERT_API_LATENCY_WARNING_THRESHOLD_MS: float = 500.0
+    ALERT_API_LATENCY_CRITICAL_THRESHOLD_MS: float = 1000.0
+    ALERT_API_LATENCY_SATURATED_THRESHOLD_MS: float = 3000.0
+    ALERT_ERROR_RATE_WARNING_THRESHOLD: float = 1.0
+    ALERT_ERROR_RATE_CRITICAL_THRESHOLD: float = 5.0
+    ALERT_ERROR_RATE_SATURATED_THRESHOLD: float = 10.0
+    # Security (Phase 23) - real failed-login attempts (POST /auth/login,
+    # status=401) already captured by AuditLogMiddleware, counted per user
+    # in a rolling window. Per-user, not per-cloud-account, so no
+    # CloudAccountAlertThreshold override either.
+    ALERT_SECURITY_FAILED_LOGIN_WINDOW_MINUTES: int = 15
+    ALERT_SECURITY_FAILED_LOGIN_WARNING_THRESHOLD: float = 3.0
+    ALERT_SECURITY_FAILED_LOGIN_CRITICAL_THRESHOLD: float = 5.0
+    ALERT_SECURITY_FAILED_LOGIN_SATURATED_THRESHOLD: float = 10.0
+    # Node Failure / Container Failure (Phase 23) - real cluster state read
+    # from the Kubernetes API (see app/integrations/kubernetes_monitor.py),
+    # pure state detection (NotReady, CrashLoopBackOff, etc.) rather than a
+    # percentage, so there is no tiered threshold to configure - only
+    # whether this evaluator runs at all. Off by default: most environments
+    # running this platform (e.g. plain `docker compose`) have no
+    # Kubernetes cluster to query, and a missing/unreachable cluster must
+    # never be treated as "no failures" by a check that never actually ran.
+    ALERT_KUBERNETES_MONITORING_ENABLED: bool = False
+    KUBERNETES_NAMESPACE: str = "cloud-ai-platform"
+    # This platform's own Prometheus instance (see docker-compose.yml /
+    # monitoring/prometheus/prometheus.yml, job "cloud-ai-backend") -
+    # already scraping http_request_duration_seconds/http_requests_total
+    # from this very backend since Phase 3/18. Queried by
+    # app/integrations/prometheus_client.py for the API Latency/Error Rate
+    # evaluators - real HTTP server telemetry, not a second metrics source.
+    PROMETHEUS_URL: str = "http://prometheus:9090"
 
     # Notification channels - each defaults to "unconfigured" (falls back to
     # logging instead of real delivery; see app/notifications/*_notifier.py)

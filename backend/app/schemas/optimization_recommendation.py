@@ -35,3 +35,7 @@ class OptimizationEvaluationSummary(BaseModel):
     recommendations_created: int
     recommendations_dismissed: int
     recommendations_auto_applied: int
+    # Phase 23: a real "resource_optimization" Alert (with real notification
+    # dispatch) now accompanies a deployment's pending recommendations - see
+    # OptimizationService._sync_resource_optimization_alert.
+    notifications_sent: int = 0

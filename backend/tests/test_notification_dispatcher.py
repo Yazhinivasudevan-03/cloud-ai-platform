@@ -271,3 +271,84 @@ def test_email_and_slack_include_timezone_context_for_a_configured_deployment(
     slack_text = mock_post.call_args.kwargs["json"]["text"]
     assert "Asia/Kolkata" in slack_text
     assert "Alert Time (Local): 2026-08-15 23:05 IST" in slack_text
+
+
+# --- Per-user alert-type/tier preference gating (Phase 23) ------------------
+
+
+def test_disabled_category_suppresses_email_but_not_the_dashboard_entry(db_session, demo_deployment):
+    import json
+
+    admin = _make_admin(db_session, "dispatch_pref_a")
+    setting = NotificationSetting(
+        user_id=admin.id,
+        email_enabled=True,
+        alert_preferences=json.dumps({"cpu": {"enabled": False, "warning": True, "critical": True, "saturated": True}}),
+    )
+    db_session.add(setting)
+    db_session.commit()
+    alert = _make_alert(db_session, demo_deployment.id)  # alert_type="cpu_elevated"
+
+    with patch("app.notifications.dispatcher.send_email", return_value=True) as mock_email:
+        created = dispatch(db_session, alert)
+    db_session.commit()
+
+    mock_email.assert_not_called()
+    channels = {
+        n.channel for n in db_session.query(Notification).filter(Notification.alert_id == alert.id).all()
+    }
+    assert channels == {"dashboard"}
+    assert created == 1
+
+
+def test_disabled_tier_suppresses_only_that_tier(db_session, demo_deployment):
+    import json
+
+    admin = _make_admin(db_session, "dispatch_pref_b")
+    setting = NotificationSetting(
+        user_id=admin.id,
+        email_enabled=True,
+        alert_preferences=json.dumps({"cpu": {"enabled": True, "warning": False, "critical": True, "saturated": True}}),
+    )
+    db_session.add(setting)
+    db_session.commit()
+    alert = _make_alert(db_session, demo_deployment.id)  # cpu_elevated = warning tier - disabled
+
+    with patch("app.notifications.dispatcher.send_email", return_value=True) as mock_email:
+        dispatch(db_session, alert)
+    db_session.commit()
+
+    mock_email.assert_not_called()
+
+
+def test_default_preferences_still_notify_when_unconfigured(db_session, demo_deployment):
+    """A user who never touched alert_preferences (NULL column) keeps
+    today's always-on behavior - the core backward-compatibility
+    guarantee for this feature."""
+    admin = _make_admin(db_session, "dispatch_pref_c")
+    db_session.add(NotificationSetting(user_id=admin.id, email_enabled=True))
+    db_session.commit()
+    alert = _make_alert(db_session, demo_deployment.id)
+
+    with patch("app.notifications.dispatcher.send_email", return_value=True) as mock_email:
+        dispatch(db_session, alert)
+    db_session.commit()
+
+    mock_email.assert_called_once()
+
+
+def test_secondary_email_is_also_sent(db_session, demo_deployment):
+    admin = _make_admin(db_session, "dispatch_pref_d")
+    db_session.add(
+        NotificationSetting(user_id=admin.id, email_enabled=True, secondary_email="backup@example.com")
+    )
+    db_session.commit()
+    alert = _make_alert(db_session, demo_deployment.id)
+
+    with patch("app.notifications.dispatcher.send_email", return_value=True) as mock_email:
+        dispatch(db_session, alert)
+    db_session.commit()
+
+    assert mock_email.call_count == 2
+    recipients = {call.args[0] for call in mock_email.call_args_list}
+    assert recipients == {"dispatch_pref_d@example.com", "backup@example.com"}
