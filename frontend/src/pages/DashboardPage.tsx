@@ -55,6 +55,7 @@ export function DashboardPage() {
       <PageHeader
         title={`Welcome back, ${user?.full_name || user?.username}`}
         subtitle="Here's what's happening across your monitored infrastructure."
+        hideBackButton
       />
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
