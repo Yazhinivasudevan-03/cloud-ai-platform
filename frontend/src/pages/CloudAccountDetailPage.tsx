@@ -121,7 +121,7 @@ export function CloudAccountDetailPage() {
       </Paper>
 
       <Box sx={{ mb: 3 }}>
-        <CloudAccountTimezonesCard accountId={id} />
+        <CloudAccountTimezonesCard accountId={id} provider={accountQuery.data?.provider ?? ""} />
       </Box>
 
       <Box sx={{ mb: 3 }}>

@@ -14,7 +14,7 @@ import type { CloudAccountTimezone } from "@/types";
 // regions/timezones - e.g. the same AWS account with both an eu-west-2
 // (London) and an ap-south-1 (Mumbai) deployment, each with their own
 // correctly-DST-adjusted local time.
-export function CloudAccountTimezonesCard({ accountId }: { accountId: number }) {
+export function CloudAccountTimezonesCard({ accountId, provider }: { accountId: number; provider: string }) {
   const queryClient = useQueryClient();
   const timezonesQuery = useQuery({
     queryKey: ["cloud-provider-accounts", accountId, "timezones"],
@@ -108,6 +108,7 @@ export function CloudAccountTimezonesCard({ accountId }: { accountId: number }) 
         <CloudAccountTimezoneFormDialog
           open={formOpen}
           accountId={accountId}
+          provider={provider}
           entry={editingEntry}
           onClose={() => setFormOpen(false)}
         />
