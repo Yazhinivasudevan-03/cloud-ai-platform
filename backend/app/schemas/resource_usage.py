@@ -36,3 +36,9 @@ class ResourceUsageRead(BaseModel):
     deployment_timezone: str | None = Field(default=None, description="IANA identifier, e.g. 'Europe/London'")
     region: str | None = None
     provider: str | None = None
+
+    # Multi-tenant SaaS isolation (Phase 24 follow-up) - makes the owning
+    # cloud account/user explicit on every response, rather than only
+    # enforced implicitly via the deployment ownership chain.
+    cloud_provider_account_id: int | None = None
+    owner_user_id: int | None = None

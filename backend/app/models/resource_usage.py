@@ -56,6 +56,23 @@ class ResourceUsage(TimestampMixin, Base):
         return account.provider if account else None
 
     @property
+    def cloud_provider_account_id(self) -> int | None:
+        """The connected cloud account this snapshot's deployment is
+        linked to, if any - makes the association explicit on every API
+        response instead of requiring a separate lookup through the
+        deployment (multi-tenant SaaS isolation, Phase 24 follow-up)."""
+        return self.deployment.cloud_provider_account_id if self.deployment else None
+
+    @property
+    def owner_user_id(self) -> int | None:
+        """The user who owns this snapshot's deployment (via
+        Project.owner_id) - every resource_usage row is always traceable
+        back to exactly one owning user, never shared or platform-wide."""
+        if self.deployment is None:
+            return None
+        return self.deployment.microservice.project.owner_id
+
+    @property
     def local_timestamp(self) -> str | None:
         tz_entry = self._cloud_account_timezone
         return format_local(self.recorded_at, tz_entry.timezone) if tz_entry else None

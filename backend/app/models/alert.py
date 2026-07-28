@@ -85,3 +85,26 @@ class Alert(TimestampMixin, Base):
     def alert_time_local(self) -> str | None:
         tz_entry = self._cloud_account_timezone
         return format_local(self.triggered_at, tz_entry.timezone) if tz_entry else None
+
+    @property
+    def cloud_provider_account_id(self) -> int | None:
+        """The connected cloud account this alert's deployment is linked
+        to, if any - null for project-scoped (cost), user-scoped
+        (security), and platform-wide alerts, none of which have a
+        single deployment to derive one from."""
+        return self.deployment.cloud_provider_account_id if self.deployment else None
+
+    @property
+    def owner_user_id(self) -> int | None:
+        """The user this alert actually belongs to - resolved the same
+        way app/notifications/dispatcher.py's _recipients() and
+        AlertService's own ownership check do, via whichever of this
+        alert's three mutually-exclusive scopes it has (deployment/
+        project/user). None only for a genuinely platform-wide alert
+        (API Latency/Error Rate/Node Failure/Container Failure) - visible
+        only to a platform is_superuser, never a regular tenant."""
+        if self.deployment_id is not None:
+            return self.deployment.microservice.project.owner_id if self.deployment else None
+        if self.project_id is not None:
+            return self.project.owner_id if self.project else None
+        return self.user_id

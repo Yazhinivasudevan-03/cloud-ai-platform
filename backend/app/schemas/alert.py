@@ -42,6 +42,12 @@ class AlertRead(BaseModel):
     region: str | None = None
     provider: str | None = None
 
+    # Multi-tenant SaaS isolation (Phase 24 follow-up) - makes the owning
+    # cloud account/user explicit on every response, rather than only
+    # enforced implicitly via the alert's own scope resolution.
+    cloud_provider_account_id: int | None = None
+    owner_user_id: int | None = None
+
 
 class AlertEvaluationSummary(BaseModel):
     """Response for POST /alerts/evaluate - what the rule engine just did."""

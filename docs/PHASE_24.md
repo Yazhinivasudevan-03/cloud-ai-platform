@@ -206,3 +206,52 @@ list — not just that the owner's own access still works.
   the SPA's `try_files` fallback. (No headless-browser tool was available in this environment to
   capture literal screenshots; verification was performed via direct HTTP/API round-trips against the
   live stack instead of a visual walkthrough.)
+
+## 10. Follow-up hardening: monitoring pipeline isolation (post-launch)
+
+A follow-up request asked for explicit confirmation that the monitoring/alert/AI pipeline is driven
+exclusively by each user's own connected cloud accounts - no shared, platform-wide, demo, or
+cross-tenant data. Investigation confirmed the following were **already true** from the work above and
+needed no change:
+
+- **Automatic collection**: `app/integrations/scheduler.py` already runs `CloudSyncService.sync_all()`
+  on a fixed interval (`CLOUD_SYNC_INTERVAL_MINUTES`) against every cloud-linked deployment's real
+  AWS/Azure/GCP account - not just on an operator's manual "sync now" request.
+- **No demo/simulated data in the running app**: `ml-models/shared/synthetic_data.py` (a demo/training
+  data generator) is only ever invoked via an explicit CLI subcommand
+  (`run_pipeline.py generate-data`) that nothing in the container's default startup, the scheduled
+  `ml-models-retrain` CronJob (`retrain-all` only), or `docker compose up` ever calls automatically.
+  `database/schema/init.sql` seeds only roles/schema, never resource_usage/metrics/alerts.
+- **Dashboards/alerts/notifications/AI reads**: already exclusively scoped to the current user via the
+  Project→Microservice→Deployment ownership chain and the `owner_id`/`user_id` filters built earlier in
+  this phase (§4) - confirmed via direct code audit of `CloudProviderAccountService` (self-service,
+  `user_id`-scoped since Phase 11, no admin bypass at all) and `NotificationService` (always
+  `user_id`-scoped).
+- **Two clarifying decisions were confirmed directly with the user**: (1) keep per-user *isolation* as
+  the only restriction - a deployment's alerts/predictions/optimization may still be driven by any
+  legitimate resource_usage for that user's own deployment (real cloud sync **or** the existing manual
+  ingestion API the test suite and ml-models pipeline both rely on), rather than rewriting the alert
+  evaluator/optimization engine/test suite to require literal cloud-sync provenance; (2) the deliberate,
+  disclosed exception remains unchanged - genuinely tenant-less platform alerts (API Latency/Error
+  Rate/Node Failure/Container Failure, introduced in Phase 23) stay visible only to a platform
+  `is_superuser`, since they describe the platform's own operational health, not any one tenant's cloud
+  account.
+
+What this pass actually **added** (additive, no rewrite):
+
+- **`ResourceUsage.cloud_provider_account_id` / `ResourceUsage.owner_user_id`** and
+  **`Alert.cloud_provider_account_id` / `Alert.owner_user_id`** - new computed model properties (backed
+  by existing FK relationships, no migration) surfaced on `ResourceUsageRead`/`AlertRead` so every
+  metric/alert response makes its owning cloud account and user explicit, rather than only enforced
+  implicitly via the ownership chain. `cloud_provider_account_id` is `null` for a deployment with no
+  linked cloud account (a real, honest null - not a fabricated value); `owner_user_id` is `null` only
+  for a genuinely platform-wide alert.
+- **`backend/tests/test_monitoring_pipeline_isolation.py`** (new, 2 tests) - a holistic, non-mocked
+  proof of the entire pipeline for two independent tenants in one test: each connects a real AWS account
+  (moto-emulated CloudWatch), links a deployment, syncs real metrics via the actual
+  `POST /deployments/{id}/sync-cloud-metrics` path, triggers the real `AlertEvaluationService`, and
+  confirms the real `dispatch()` notification fan-out - at every step, tenant A's data is fully absent
+  from tenant B's reads and vice versa. A second test confirms a deployment with no connected cloud
+  account still resolves a real, non-null owner while `cloud_provider_account_id` stays honestly null.
+
+**Updated test count**: 455/455 backend tests passing (up from 448), 64/64 frontend tests passing.

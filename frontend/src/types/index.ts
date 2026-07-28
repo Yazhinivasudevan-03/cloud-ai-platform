@@ -229,6 +229,10 @@ export interface ResourceUsage {
   deployment_timezone: string | null;
   region: string | null;
   provider: string | null;
+  // Multi-tenant SaaS isolation - makes the owning cloud account/user
+  // explicit on every response.
+  cloud_provider_account_id: number | null;
+  owner_user_id: number | null;
 }
 
 // --- AI output (read-only) ----------------------------------------------
@@ -290,6 +294,11 @@ export interface Alert {
   deployment_timezone: string | null;
   region: string | null;
   provider: string | null;
+  // Multi-tenant SaaS isolation - makes the owning cloud account/user
+  // explicit on every response (null for a genuinely platform-wide
+  // alert, visible only to a platform superuser).
+  cloud_provider_account_id: number | null;
+  owner_user_id: number | null;
 }
 
 export interface AlertEvaluationSummary {
