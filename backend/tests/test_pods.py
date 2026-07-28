@@ -98,7 +98,9 @@ def test_update_pod_restart_count_succeeds_for_operator(client, make_user_with_r
     assert response.json()["status"] == "failed"
 
 
-def test_delete_pod_requires_admin(client, make_user_with_role):
+def test_delete_pod_requires_admin(client, make_user_with_role, db_session):
+    from app.models.user import Role, User
+
     operator_token = make_user_with_role("operator_user", "operator")
     deployment = _create_deployment(client, operator_token)
     pod = client.post(
@@ -110,6 +112,29 @@ def test_delete_pod_requires_admin(client, make_user_with_role):
     denied = client.delete(f"/api/v1/pods/{pod['id']}", headers=_auth_header(operator_token))
     assert denied.status_code == 403
 
-    admin_token = make_user_with_role("admin_user", "admin")
-    allowed = client.delete(f"/api/v1/pods/{pod['id']}", headers=_auth_header(admin_token))
+    # Deleting requires the admin role AND being the project's own owner
+    # (Phase 24: admin is an app-management role within a tenant, not a
+    # cross-tenant bypass) - grant the SAME owner the admin role rather
+    # than using a second, unrelated user.
+    admin_role = db_session.query(Role).filter(Role.name == "admin").one()
+    owner = db_session.query(User).filter(User.username == "operator_user").one()
+    owner.roles.append(admin_role)
+    db_session.commit()
+
+    allowed = client.delete(f"/api/v1/pods/{pod['id']}", headers=_auth_header(operator_token))
     assert allowed.status_code == 204
+
+
+def test_delete_pod_forbidden_for_a_non_owner_admin(client, make_user_with_role):
+    owner_token = make_user_with_role("pod_owner", "operator")
+    deployment = _create_deployment(client, owner_token)
+    pod = client.post(
+        f"/api/v1/deployments/{deployment['id']}/pods",
+        json={"pod_name": "pod-a"},
+        headers=_auth_header(owner_token),
+    ).json()
+
+    other_admin_token = make_user_with_role("other_pod_admin", "admin")
+    response = client.delete(f"/api/v1/pods/{pod['id']}", headers=_auth_header(other_admin_token))
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "NOT_YOUR_PROJECT"

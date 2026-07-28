@@ -37,7 +37,7 @@ def create_deployment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> DeploymentRead:
-    return DeploymentController(db).create(microservice_id, payload, current_user.id)
+    return DeploymentController(db).create(microservice_id, payload, current_user)
 
 
 @router.get(
@@ -50,15 +50,26 @@ def list_deployments(
     microservice_id: int,
     status: str | None = Query(default=None),
     namespace: str | None = Query(default=None),
+    cloud_provider_account_id: int | None = Query(
+        default=None, description="Narrow the listing to deployments linked to one cloud account"
+    ),
     sort_by: Literal["name", "created_at", "status"] = Query(default="created_at"),
     order: Literal["asc", "desc"] = Query(default="desc"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[DeploymentRead]:
     return DeploymentController(db).list(
-        microservice_id, status, namespace, sort_by, order, page, page_size
+        microservice_id,
+        status,
+        namespace,
+        sort_by,
+        order,
+        page,
+        page_size,
+        current_user,
+        cloud_provider_account_id,
     )
 
 
@@ -66,14 +77,17 @@ def list_deployments(
     "/deployments/{deployment_id}",
     response_model=DeploymentRead,
     summary="Get a deployment by ID",
-    responses={404: {"model": ErrorResponse, "description": "Deployment not found"}},
+    responses={
+        403: {"model": ErrorResponse, "description": "Deployment's project belongs to another user"},
+        404: {"model": ErrorResponse, "description": "Deployment not found"},
+    },
 )
 def get_deployment(
     deployment_id: int,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> DeploymentRead:
-    return DeploymentController(db).get(deployment_id)
+    return DeploymentController(db).get(deployment_id, current_user)
 
 
 @router.put(
@@ -82,7 +96,7 @@ def get_deployment(
     summary="Update a deployment (operator/admin)",
     dependencies=[Depends(require_roles("operator", "admin"))],
     responses={
-        403: {"model": ErrorResponse, "description": "cloud_provider_account_id belongs to another user"},
+        403: {"model": ErrorResponse, "description": "Deployment/cloud_provider_account_id belongs to another user"},
         404: {"model": ErrorResponse, "description": "Deployment not found"},
         409: {"model": ErrorResponse, "description": "Deployment already exists in namespace"},
     },
@@ -93,7 +107,7 @@ def update_deployment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> DeploymentRead:
-    return DeploymentController(db).update(deployment_id, payload, current_user.id)
+    return DeploymentController(db).update(deployment_id, payload, current_user)
 
 
 @router.delete(
@@ -101,10 +115,17 @@ def update_deployment(
     status_code=204,
     summary="Delete a deployment (admin only)",
     dependencies=[Depends(require_roles("admin"))],
-    responses={404: {"model": ErrorResponse, "description": "Deployment not found"}},
+    responses={
+        403: {"model": ErrorResponse, "description": "Deployment's project belongs to another user"},
+        404: {"model": ErrorResponse, "description": "Deployment not found"},
+    },
 )
-def delete_deployment(deployment_id: int, db: Session = Depends(get_db)) -> None:
-    DeploymentController(db).delete(deployment_id)
+def delete_deployment(
+    deployment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> None:
+    DeploymentController(db).delete(deployment_id, current_user)
 
 
 @router.post(
@@ -126,6 +147,6 @@ def sync_deployment_cloud_metrics(
     request: Request,
     deployment_id: int,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> CloudSyncResult:
-    return DeploymentController(db).sync_cloud_metrics(deployment_id)
+    return DeploymentController(db).sync_cloud_metrics(deployment_id, current_user)

@@ -1,8 +1,8 @@
 """Integration tests for the project monthly-budget/cost-threshold API
-(Phase 21). Unlike cloud-provider-account thresholds, there is no
-ownership check here - projects follow this platform's normal RBAC
-policy (any authenticated user reads, operator/admin writes), matching
-every other Project endpoint.
+(Phase 21). Phase 24 added the same per-project ownership check every
+other Project endpoint now enforces: only the project's own owner (or a
+platform is_superuser) may read or write its cost thresholds - role
+(viewer/operator/admin) then further gates read vs write for that owner.
 """
 def _auth_header(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
@@ -29,22 +29,53 @@ def test_get_cost_thresholds_returns_platform_defaults_when_never_configured(cli
     assert body["effective_cost_saturated_threshold"] == 90.0
 
 
-def test_viewer_can_read_but_not_update_cost_thresholds(client, make_user_with_role):
-    operator_token = make_user_with_role("cost_threshold_op", "operator")
-    viewer_token = make_user_with_role("cost_threshold_viewer_only")
-    project_id = _create_project(client, operator_token)
+def test_owner_can_read_but_not_update_cost_thresholds_without_operator_role(
+    client, make_user_with_role, db_session
+):
+    from app.models.user import Role, User
+
+    token = make_user_with_role("cost_threshold_op", "operator")
+    project_id = _create_project(client, token)
+
+    # Still the project's own owner - just stripped back down to the
+    # default viewer role after creating it, so only WRITE access is
+    # denied (role), not READ access (which ownership alone grants).
+    user = db_session.query(User).filter(User.username == "cost_threshold_op").one()
+    operator_role = db_session.query(Role).filter(Role.name == "operator").one()
+    user.roles.remove(operator_role)
+    db_session.commit()
 
     get_response = client.get(
-        f"/api/v1/projects/{project_id}/cost-thresholds", headers=_auth_header(viewer_token)
+        f"/api/v1/projects/{project_id}/cost-thresholds", headers=_auth_header(token)
     )
     assert get_response.status_code == 200
 
     put_response = client.put(
         f"/api/v1/projects/{project_id}/cost-thresholds",
         json={"monthly_budget": 1000.0},
-        headers=_auth_header(viewer_token),
+        headers=_auth_header(token),
     )
     assert put_response.status_code == 403
+
+
+def test_cost_thresholds_are_forbidden_for_a_non_owner(client, make_user_with_role):
+    owner_token = make_user_with_role("cost_threshold_owner", "operator")
+    other_token = make_user_with_role("cost_threshold_other", "admin")
+    project_id = _create_project(client, owner_token)
+
+    get_response = client.get(
+        f"/api/v1/projects/{project_id}/cost-thresholds", headers=_auth_header(other_token)
+    )
+    assert get_response.status_code == 403
+    assert get_response.json()["error"]["code"] == "NOT_YOUR_PROJECT"
+
+    put_response = client.put(
+        f"/api/v1/projects/{project_id}/cost-thresholds",
+        json={"monthly_budget": 1000.0},
+        headers=_auth_header(other_token),
+    )
+    assert put_response.status_code == 403
+    assert put_response.json()["error"]["code"] == "NOT_YOUR_PROJECT"
 
 
 def test_update_cost_thresholds_persists_budget_and_override(client, make_user_with_role):

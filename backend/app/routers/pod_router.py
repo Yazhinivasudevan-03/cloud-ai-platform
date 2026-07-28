@@ -26,9 +26,12 @@ router = APIRouter(tags=["Pods"])
     },
 )
 def create_pod(
-    deployment_id: int, payload: PodCreate, db: Session = Depends(get_db)
+    deployment_id: int,
+    payload: PodCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> PodRead:
-    return PodController(db).create(deployment_id, payload)
+    return PodController(db).create(deployment_id, payload, current_user)
 
 
 @router.get(
@@ -45,23 +48,26 @@ def list_pods(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[PodRead]:
-    return PodController(db).list(deployment_id, status, sort_by, order, page, page_size)
+    return PodController(db).list(deployment_id, status, sort_by, order, page, page_size, current_user)
 
 
 @router.get(
     "/pods/{pod_id}",
     response_model=PodRead,
     summary="Get a pod by ID",
-    responses={404: {"model": ErrorResponse, "description": "Pod not found"}},
+    responses={
+        403: {"model": ErrorResponse, "description": "Pod's project belongs to another user"},
+        404: {"model": ErrorResponse, "description": "Pod not found"},
+    },
 )
 def get_pod(
     pod_id: int,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PodRead:
-    return PodController(db).get(pod_id)
+    return PodController(db).get(pod_id, current_user)
 
 
 @router.put(
@@ -69,10 +75,18 @@ def get_pod(
     response_model=PodRead,
     summary="Update a pod (operator/admin)",
     dependencies=[Depends(require_roles("operator", "admin"))],
-    responses={404: {"model": ErrorResponse, "description": "Pod not found"}},
+    responses={
+        403: {"model": ErrorResponse, "description": "Pod's project belongs to another user"},
+        404: {"model": ErrorResponse, "description": "Pod not found"},
+    },
 )
-def update_pod(pod_id: int, payload: PodUpdate, db: Session = Depends(get_db)) -> PodRead:
-    return PodController(db).update(pod_id, payload)
+def update_pod(
+    pod_id: int,
+    payload: PodUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> PodRead:
+    return PodController(db).update(pod_id, payload, current_user)
 
 
 @router.delete(
@@ -80,7 +94,14 @@ def update_pod(pod_id: int, payload: PodUpdate, db: Session = Depends(get_db)) -
     status_code=204,
     summary="Delete a pod (admin only)",
     dependencies=[Depends(require_roles("admin"))],
-    responses={404: {"model": ErrorResponse, "description": "Pod not found"}},
+    responses={
+        403: {"model": ErrorResponse, "description": "Pod's project belongs to another user"},
+        404: {"model": ErrorResponse, "description": "Pod not found"},
+    },
 )
-def delete_pod(pod_id: int, db: Session = Depends(get_db)) -> None:
-    PodController(db).delete(pod_id)
+def delete_pod(
+    pod_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> None:
+    PodController(db).delete(pod_id, current_user)

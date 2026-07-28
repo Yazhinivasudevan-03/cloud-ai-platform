@@ -7,16 +7,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { authApi, type RegisterPayload } from "@/services/authApi";
+import { authApi } from "@/services/authApi";
 import { registerAuthFailureHandler, tokenStorage } from "@/services/httpClient";
-import type { RoleName, User } from "@/types";
+import type { RegisterPayload, RegisterResponse, RoleName, User } from "@/types";
 
 interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  register: (payload: RegisterPayload) => Promise<void>;
+  login: (identifier: string, password: string, rememberMe?: boolean) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<RegisterResponse>;
   logout: () => void;
   hasRole: (...roles: RoleName[]) => boolean;
   refreshCurrentUser: () => Promise<void>;
@@ -50,17 +50,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     registerAuthFailureHandler(() => setUser(null));
   }, [loadCurrentUser]);
 
-  const login = useCallback(async (username: string, password: string) => {
-    const tokens = await authApi.login(username, password);
+  const login = useCallback(async (identifier: string, password: string, rememberMe = false) => {
+    const tokens = await authApi.login(identifier, password, rememberMe);
     tokenStorage.setTokens(tokens);
     const currentUser = await authApi.me();
     setUser(currentUser);
   }, []);
 
   const register = useCallback(async (payload: RegisterPayload) => {
-    await authApi.register(payload);
-    await login(payload.username, payload.password);
-  }, [login]);
+    // Deliberately does NOT log in afterwards - a fresh account is
+    // unverified, and login now correctly 403s with EMAIL_NOT_VERIFIED
+    // until the user completes the email verification step. The caller
+    // (RegisterPage) uses the returned verification_token/verification_link
+    // to show a "check your email" screen instead.
+    return authApi.register(payload);
+  }, []);
 
   const logout = useCallback(() => {
     tokenStorage.clear();

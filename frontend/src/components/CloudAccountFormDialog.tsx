@@ -28,15 +28,19 @@ export function CloudAccountFormDialog({
   open,
   account,
   onClose,
+  initialProvider,
 }: {
   open: boolean;
   account: CloudProviderAccount | null;
   onClose: () => void;
+  /** Preselects the Provider field (e.g. from a "Connect AWS" button) -
+   * only used for a new account, never overrides an existing one being edited. */
+  initialProvider?: string;
 }) {
   const isEdit = account !== null;
   const queryClient = useQueryClient();
 
-  const [provider, setProvider] = useState(account?.provider ?? "aws");
+  const [provider, setProvider] = useState(account?.provider ?? initialProvider ?? "aws");
   const [customProvider, setCustomProvider] = useState(
     account && !KNOWN_PROVIDERS.some((p) => p.value === account.provider) ? account.provider : ""
   );

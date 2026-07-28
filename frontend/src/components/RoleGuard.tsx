@@ -9,7 +9,7 @@ export function RoleGuard({ roles }: { roles: RoleName[] }) {
   const { hasRole } = useAuth();
 
   if (!hasRole(...roles)) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <Outlet />;

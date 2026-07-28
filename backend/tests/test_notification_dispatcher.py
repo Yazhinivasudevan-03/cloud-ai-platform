@@ -1,6 +1,8 @@
 """Direct tests for app.notifications.dispatcher.dispatch() - the per-user
-opt-in, do-not-disturb, and shared-destination dedup logic (Phase 20).
-Exercised directly against a real Alert row rather than through the full
+opt-in, do-not-disturb, and shared-destination dedup logic (Phase 20),
+now resolved against an alert's real owner(s) rather than every admin
+(Phase 24 - see dispatcher.py's own _recipients() docstring). Exercised
+directly against a real Alert row rather than through the full
 alert-evaluation pipeline, since that's already covered by
 test_alert_evaluation.py.
 """
@@ -15,12 +17,15 @@ from app.models.microservice import Microservice
 from app.models.notification import Notification
 from app.models.notification_setting import NotificationSetting
 from app.models.project import Project
-from app.models.user import Role, User
+from app.models.user import User
 from app.notifications.dispatcher import dispatch
 
 
 @pytest.fixture()
 def demo_deployment(db_session):
+    """A deployment whose project owner is the sole recipient of any of
+    its alerts (Phase 24 - a deployment-scoped alert's only real owner is
+    that deployment's own project owner, not every admin)."""
     owner = User(
         username="dispatch_owner", email="dispatch_owner@example.com",
         hashed_password="not-a-real-hash", is_active=True, is_superuser=False,
@@ -37,16 +42,18 @@ def demo_deployment(db_session):
     db_session.add(deployment)
     db_session.commit()
     db_session.refresh(deployment)
+    db_session.refresh(owner)
     return deployment
 
 
-def _make_admin(db_session, username: str) -> User:
-    admin_role = db_session.query(Role).filter(Role.name == "admin").one()
+def _make_superuser(db_session, username: str) -> User:
+    """A platform operator (Phase 24's is_superuser flag) - the only
+    audience for genuinely platform-wide, tenant-less alerts (see
+    dispatcher.py's _recipients())."""
     user = User(
         username=username, email=f"{username}@example.com",
-        hashed_password="not-a-real-hash", is_active=True, is_superuser=False,
+        hashed_password="not-a-real-hash", is_active=True, is_superuser=True,
     )
-    user.roles.append(admin_role)
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
@@ -65,11 +72,25 @@ def _make_alert(db_session, deployment_id: int) -> Alert:
     return alert
 
 
+def _make_platform_wide_alert(db_session) -> Alert:
+    """deployment_id/project_id/user_id all null - the same genuinely
+    tenant-less shape Phase 23's API Latency/Error Rate/Node Failure/
+    Container Failure evaluators produce (see app/models/alert.py)."""
+    alert = Alert(
+        alert_type="api_latency_elevated", severity="warning", message="API latency is elevated",
+        status="active", triggered_at=datetime(2026, 7, 15, 12, 0, 0),
+    )
+    db_session.add(alert)
+    db_session.commit()
+    db_session.refresh(alert)
+    return alert
+
+
 def test_dashboard_notification_always_recorded_even_during_dnd(db_session, demo_deployment):
-    admin = _make_admin(db_session, "dispatch_dnd_a")
+    owner = demo_deployment.microservice.project.owner
     db_session.add(
         NotificationSetting(
-            user_id=admin.id, dnd_start_time=time(0, 0), dnd_end_time=time(23, 59, 59)
+            user_id=owner.id, dnd_start_time=time(0, 0), dnd_end_time=time(23, 59, 59)
         )
     )
     db_session.commit()
@@ -86,8 +107,8 @@ def test_dashboard_notification_always_recorded_even_during_dnd(db_session, demo
 
 
 def test_instant_alerts_disabled_suppresses_everything_but_dashboard(db_session, demo_deployment):
-    admin = _make_admin(db_session, "dispatch_instant_off")
-    db_session.add(NotificationSetting(user_id=admin.id, instant_alerts_enabled=False))
+    owner = demo_deployment.microservice.project.owner
+    db_session.add(NotificationSetting(user_id=owner.id, instant_alerts_enabled=False))
     db_session.commit()
     alert = _make_alert(db_session, demo_deployment.id)
 
@@ -104,7 +125,6 @@ def test_instant_alerts_disabled_suppresses_everything_but_dashboard(db_session,
 def test_disabled_channel_is_never_attempted(db_session, demo_deployment):
     """slack_enabled defaults to False - dispatch must not even call the
     Slack notifier, let alone record a Notification for it."""
-    _make_admin(db_session, "dispatch_no_slack")
     alert = _make_alert(db_session, demo_deployment.id)
 
     with patch("app.notifications.dispatcher.send_slack_message") as mock_slack:
@@ -114,18 +134,31 @@ def test_disabled_channel_is_never_attempted(db_session, demo_deployment):
     mock_slack.assert_not_called()
 
 
-def test_two_admins_sharing_the_global_slack_webhook_only_post_once(db_session, demo_deployment, monkeypatch):
+def test_no_recipient_skips_notification_without_error(db_session):
+    """A platform-wide alert with zero active superusers must not raise -
+    it just has nobody to notify."""
+    alert = _make_platform_wide_alert(db_session)
+
+    created = dispatch(db_session, alert)
+
+    assert created == 0
+
+
+def test_two_superusers_sharing_the_global_slack_webhook_only_post_once(db_session, monkeypatch):
+    """A platform-wide alert notifies every is_superuser - the shared-
+    destination dedup still matters here, since it's the one case with
+    more than one recipient."""
     from app.config.settings import get_settings
 
     settings = get_settings()
     monkeypatch.setattr(settings, "SLACK_WEBHOOK_URL", "https://hooks.slack.example/shared")
 
-    admin_a = _make_admin(db_session, "dispatch_shared_a")
-    admin_b = _make_admin(db_session, "dispatch_shared_b")
-    for admin in (admin_a, admin_b):
-        db_session.add(NotificationSetting(user_id=admin.id, slack_enabled=True))
+    superuser_a = _make_superuser(db_session, "dispatch_shared_a")
+    superuser_b = _make_superuser(db_session, "dispatch_shared_b")
+    for su in (superuser_a, superuser_b):
+        db_session.add(NotificationSetting(user_id=su.id, slack_enabled=True))
     db_session.commit()
-    alert = _make_alert(db_session, demo_deployment.id)
+    alert = _make_platform_wide_alert(db_session)
 
     mock_response = MagicMock()
     mock_response.raise_for_status.return_value = None
@@ -139,19 +172,17 @@ def test_two_admins_sharing_the_global_slack_webhook_only_post_once(db_session, 
         .filter(Notification.alert_id == alert.id, Notification.channel == "slack")
         .all()
     )
-    assert len(slack_notifications) == 2  # both admins still get their own history row
+    assert len(slack_notifications) == 2  # both superusers still get their own history row
 
 
-def test_two_admins_with_different_personal_slack_webhooks_each_get_posted_to(
-    db_session, demo_deployment
-):
+def test_two_superusers_with_different_personal_slack_webhooks_each_get_posted_to(db_session):
     from app.utils.crypto import encrypt_credentials
 
-    admin_a = _make_admin(db_session, "dispatch_personal_a")
-    admin_b = _make_admin(db_session, "dispatch_personal_b")
+    superuser_a = _make_superuser(db_session, "dispatch_personal_a")
+    superuser_b = _make_superuser(db_session, "dispatch_personal_b")
     db_session.add(
         NotificationSetting(
-            user_id=admin_a.id,
+            user_id=superuser_a.id,
             slack_enabled=True,
             credentials_encrypted=encrypt_credentials(
                 {"slack_webhook_url": "https://hooks.slack.example/personal-a"}
@@ -160,7 +191,7 @@ def test_two_admins_with_different_personal_slack_webhooks_each_get_posted_to(
     )
     db_session.add(
         NotificationSetting(
-            user_id=admin_b.id,
+            user_id=superuser_b.id,
             slack_enabled=True,
             credentials_encrypted=encrypt_credentials(
                 {"slack_webhook_url": "https://hooks.slack.example/personal-b"}
@@ -168,7 +199,7 @@ def test_two_admins_with_different_personal_slack_webhooks_each_get_posted_to(
         )
     )
     db_session.commit()
-    alert = _make_alert(db_session, demo_deployment.id)
+    alert = _make_platform_wide_alert(db_session)
 
     mock_response = MagicMock()
     mock_response.raise_for_status.return_value = None
@@ -190,8 +221,8 @@ def test_two_admins_with_different_personal_slack_webhooks_each_get_posted_to(
 def test_email_body_unchanged_without_a_configured_deployment_timezone(db_session, demo_deployment):
     """Regression: deployments with no linked cloud account timezone must
     keep sending the exact same plain alert.message as before."""
-    admin = _make_admin(db_session, "dispatch_tz_off")
-    db_session.add(NotificationSetting(user_id=admin.id, email_enabled=True))
+    owner = demo_deployment.microservice.project.owner
+    db_session.add(NotificationSetting(user_id=owner.id, email_enabled=True))
     db_session.commit()
     alert = _make_alert(db_session, demo_deployment.id)
 
@@ -199,7 +230,7 @@ def test_email_body_unchanged_without_a_configured_deployment_timezone(db_sessio
         dispatch(db_session, alert)
     db_session.commit()
 
-    mock_email.assert_called_once_with(admin.email, "[WARNING] cpu_elevated", "CPU is elevated")
+    mock_email.assert_called_once_with(owner.email, "[WARNING] cpu_elevated", "CPU is elevated")
 
 
 def test_email_and_slack_include_timezone_context_for_a_configured_deployment(
@@ -238,8 +269,8 @@ def test_email_and_slack_include_timezone_context_for_a_configured_deployment(
     demo_deployment.cloud_account_timezone_id = timezone_entry.id
     db_session.commit()
 
-    admin = _make_admin(db_session, "dispatch_tz_on")
-    db_session.add(NotificationSetting(user_id=admin.id, email_enabled=True, slack_enabled=True))
+    owner = demo_deployment.microservice.project.owner
+    db_session.add(NotificationSetting(user_id=owner.id, email_enabled=True, slack_enabled=True))
     db_session.commit()
 
     alert = Alert(
@@ -279,9 +310,9 @@ def test_email_and_slack_include_timezone_context_for_a_configured_deployment(
 def test_disabled_category_suppresses_email_but_not_the_dashboard_entry(db_session, demo_deployment):
     import json
 
-    admin = _make_admin(db_session, "dispatch_pref_a")
+    owner = demo_deployment.microservice.project.owner
     setting = NotificationSetting(
-        user_id=admin.id,
+        user_id=owner.id,
         email_enabled=True,
         alert_preferences=json.dumps({"cpu": {"enabled": False, "warning": True, "critical": True, "saturated": True}}),
     )
@@ -304,9 +335,9 @@ def test_disabled_category_suppresses_email_but_not_the_dashboard_entry(db_sessi
 def test_disabled_tier_suppresses_only_that_tier(db_session, demo_deployment):
     import json
 
-    admin = _make_admin(db_session, "dispatch_pref_b")
+    owner = demo_deployment.microservice.project.owner
     setting = NotificationSetting(
-        user_id=admin.id,
+        user_id=owner.id,
         email_enabled=True,
         alert_preferences=json.dumps({"cpu": {"enabled": True, "warning": False, "critical": True, "saturated": True}}),
     )
@@ -325,8 +356,8 @@ def test_default_preferences_still_notify_when_unconfigured(db_session, demo_dep
     """A user who never touched alert_preferences (NULL column) keeps
     today's always-on behavior - the core backward-compatibility
     guarantee for this feature."""
-    admin = _make_admin(db_session, "dispatch_pref_c")
-    db_session.add(NotificationSetting(user_id=admin.id, email_enabled=True))
+    owner = demo_deployment.microservice.project.owner
+    db_session.add(NotificationSetting(user_id=owner.id, email_enabled=True))
     db_session.commit()
     alert = _make_alert(db_session, demo_deployment.id)
 
@@ -338,9 +369,9 @@ def test_default_preferences_still_notify_when_unconfigured(db_session, demo_dep
 
 
 def test_secondary_email_is_also_sent(db_session, demo_deployment):
-    admin = _make_admin(db_session, "dispatch_pref_d")
+    owner = demo_deployment.microservice.project.owner
     db_session.add(
-        NotificationSetting(user_id=admin.id, email_enabled=True, secondary_email="backup@example.com")
+        NotificationSetting(user_id=owner.id, email_enabled=True, secondary_email="backup@example.com")
     )
     db_session.commit()
     alert = _make_alert(db_session, demo_deployment.id)
@@ -351,4 +382,4 @@ def test_secondary_email_is_also_sent(db_session, demo_deployment):
 
     assert mock_email.call_count == 2
     recipients = {call.args[0] for call in mock_email.call_args_list}
-    assert recipients == {"dispatch_pref_d@example.com", "backup@example.com"}
+    assert recipients == {owner.email, "backup@example.com"}

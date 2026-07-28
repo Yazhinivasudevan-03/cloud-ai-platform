@@ -21,3 +21,11 @@ class UserRepository(BaseRepository[User]):
     def username_or_email_exists(self, username: str, email: str) -> bool:
         stmt = select(User).where((User.username == username) | (User.email == email))
         return self.db.scalars(stmt).first() is not None
+
+    def get_by_email_verification_token_hash(self, token_hash: str) -> User | None:
+        stmt = select(User).where(User.email_verification_token_hash == token_hash)
+        return self.db.scalars(stmt).first()
+
+    def get_by_password_reset_token_hash(self, token_hash: str) -> User | None:
+        stmt = select(User).where(User.password_reset_token_hash == token_hash)
+        return self.db.scalars(stmt).first()

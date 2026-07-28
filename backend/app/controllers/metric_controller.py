@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.models.user import User
 from app.schemas.common import PaginatedResponse, PaginationMeta
 from app.schemas.metric import MetricCreate, MetricRead
 from app.services.metric_service import MetricService
@@ -13,8 +14,8 @@ class MetricController:
     def __init__(self, db: Session):
         self.service = MetricService(db)
 
-    def ingest(self, deployment_id: int, payload: MetricCreate) -> MetricRead:
-        metric = self.service.ingest(deployment_id, payload)
+    def ingest(self, deployment_id: int, payload: MetricCreate, current_user: User) -> MetricRead:
+        metric = self.service.ingest(deployment_id, payload, current_user)
         return MetricRead.model_validate(metric)
 
     def list(
@@ -25,8 +26,11 @@ class MetricController:
         until: datetime | None,
         page: int,
         page_size: int,
+        current_user: User,
     ) -> PaginatedResponse[MetricRead]:
-        items, total = self.service.list(deployment_id, metric_type, since, until, page, page_size)
+        items, total = self.service.list(
+            deployment_id, metric_type, since, until, page, page_size, current_user
+        )
         total_pages = math.ceil(total / page_size) if page_size else 0
         return PaginatedResponse[MetricRead](
             items=[MetricRead.model_validate(i) for i in items],

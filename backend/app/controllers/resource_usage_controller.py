@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.models.user import User
 from app.schemas.common import PaginatedResponse, PaginationMeta
 from app.schemas.resource_usage import ResourceUsageCreate, ResourceUsageRead
 from app.services.resource_usage_service import ResourceUsageService
@@ -13,8 +14,10 @@ class ResourceUsageController:
     def __init__(self, db: Session):
         self.service = ResourceUsageService(db)
 
-    def ingest(self, deployment_id: int, payload: ResourceUsageCreate) -> ResourceUsageRead:
-        usage = self.service.ingest(deployment_id, payload)
+    def ingest(
+        self, deployment_id: int, payload: ResourceUsageCreate, current_user: User
+    ) -> ResourceUsageRead:
+        usage = self.service.ingest(deployment_id, payload, current_user)
         return ResourceUsageRead.model_validate(usage)
 
     def list(
@@ -24,8 +27,9 @@ class ResourceUsageController:
         until: datetime | None,
         page: int,
         page_size: int,
+        current_user: User,
     ) -> PaginatedResponse[ResourceUsageRead]:
-        items, total = self.service.list(deployment_id, since, until, page, page_size)
+        items, total = self.service.list(deployment_id, since, until, page, page_size, current_user)
         total_pages = math.ceil(total / page_size) if page_size else 0
         return PaginatedResponse[ResourceUsageRead](
             items=[ResourceUsageRead.model_validate(i) for i in items],

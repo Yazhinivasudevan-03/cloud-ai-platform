@@ -23,13 +23,19 @@ class ProjectController:
         project = self.service.create(payload, owner)
         return ProjectRead.model_validate(project)
 
-    def get(self, project_id: int) -> ProjectRead:
-        return ProjectRead.model_validate(self.service.get(project_id))
+    def get(self, project_id: int, current_user: User) -> ProjectRead:
+        return ProjectRead.model_validate(self.service.get(project_id, current_user))
 
     def list(
-        self, name: str | None, sort_by: str, order: str, page: int, page_size: int
+        self,
+        name: str | None,
+        sort_by: str,
+        order: str,
+        page: int,
+        page_size: int,
+        current_user: User,
     ) -> PaginatedResponse[ProjectRead]:
-        items, total = self.service.list(name, sort_by, order, page, page_size)
+        items, total = self.service.list(name, sort_by, order, page, page_size, current_user)
         total_pages = math.ceil(total / page_size) if page_size else 0
         return PaginatedResponse[ProjectRead](
             items=[ProjectRead.model_validate(i) for i in items],
@@ -38,16 +44,16 @@ class ProjectController:
             ),
         )
 
-    def update(self, project_id: int, payload: ProjectUpdate) -> ProjectRead:
-        return ProjectRead.model_validate(self.service.update(project_id, payload))
+    def update(self, project_id: int, payload: ProjectUpdate, current_user: User) -> ProjectRead:
+        return ProjectRead.model_validate(self.service.update(project_id, payload, current_user))
 
-    def delete(self, project_id: int) -> None:
-        self.service.delete(project_id)
+    def delete(self, project_id: int, current_user: User) -> None:
+        self.service.delete(project_id, current_user)
 
-    def get_cost_thresholds(self, project_id: int) -> ProjectCostThresholdRead:
-        return self.service.get_cost_thresholds(project_id)
+    def get_cost_thresholds(self, project_id: int, current_user: User) -> ProjectCostThresholdRead:
+        return self.service.get_cost_thresholds(project_id, current_user)
 
     def update_cost_thresholds(
-        self, project_id: int, payload: ProjectCostThresholdUpdate
+        self, project_id: int, payload: ProjectCostThresholdUpdate, current_user: User
     ) -> ProjectCostThresholdRead:
-        return self.service.update_cost_thresholds(project_id, payload)
+        return self.service.update_cost_thresholds(project_id, payload, current_user)

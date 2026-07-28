@@ -70,17 +70,25 @@ def test_list_predictions_returns_seeded_rows_filtered_by_metric_type(
     )
     db_session.commit()
 
-    viewer_token = make_user_with_role("viewer_user")
+    # The deployment's own owner (any role) can read its predictions.
     response = client.get(
         f"/api/v1/deployments/{deployment['id']}/predictions",
         params={"metric_type": "cpu_usage_percent"},
-        headers=_auth_header(viewer_token),
+        headers=_auth_header(operator_token),
     )
     assert response.status_code == 200
     body = response.json()
     assert body["meta"]["total"] == 1
     assert body["items"][0]["metric_type"] == "cpu_usage_percent"
     assert body["items"][0]["confidence_score"] == 0.88
+
+    # A different, non-owning user cannot (Phase 24 per-user isolation).
+    other_token = make_user_with_role("other_viewer_user")
+    forbidden = client.get(
+        f"/api/v1/deployments/{deployment['id']}/predictions", headers=_auth_header(other_token)
+    )
+    assert forbidden.status_code == 403
+    assert forbidden.json()["error"]["code"] == "NOT_YOUR_PROJECT"
 
 
 def test_list_anomaly_detections_filters_by_is_anomaly(client, make_user_with_role, db_session):
@@ -109,11 +117,10 @@ def test_list_anomaly_detections_filters_by_is_anomaly(client, make_user_with_ro
     )
     db_session.commit()
 
-    viewer_token = make_user_with_role("viewer_user")
     response = client.get(
         f"/api/v1/deployments/{deployment['id']}/anomaly-detections",
         params={"is_anomaly": "true"},
-        headers=_auth_header(viewer_token),
+        headers=_auth_header(operator_token),
     )
     assert response.status_code == 200
     body = response.json()
@@ -136,10 +143,9 @@ def test_list_failure_predictions_returns_seeded_rows(client, make_user_with_rol
     )
     db_session.commit()
 
-    viewer_token = make_user_with_role("viewer_user")
     response = client.get(
         f"/api/v1/deployments/{deployment['id']}/failure-predictions",
-        headers=_auth_header(viewer_token),
+        headers=_auth_header(operator_token),
     )
     assert response.status_code == 200
     body = response.json()

@@ -33,6 +33,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 | 21 | Disk/network alert thresholds (deployment-scoped, per-account overrides) + project-scoped cost budget/threshold alerting (a new `Alert.project_id`) - all live-verified, including a custom threshold override genuinely changing alert behavior | **Complete** - see [`docs/PHASE_21.md`](docs/PHASE_21.md) |
 | 22 | Multi-timezone support for cloud accounts (a new `CloudAccountTimezone` table, IANA-only via stdlib `zoneinfo`, zero new dependencies) - deployments optionally link to a configured region/timezone so monitoring/alerts/notifications surface local time alongside UTC; extend-only (no existing table/API/feature changed shape), live-verified against AWS London, AWS Mumbai, Azure UK South, and GCP Mumbai | **Complete** - see [`docs/PHASE_22.md`](docs/PHASE_22.md) |
 | 23 | Back buttons on every page (one shared component); a real Notification Bell (severity counts, mark-read/clear/view-details) + per-user notification settings (secondary email, country code, Telegram username, language, a full 15-category/tier preference table); real (non-fabricated) alert evaluators added for all 9 previously-missing categories - Cloud Usage, Storage, Pod Restart, Resource Optimization, Security (real failed logins), API Latency/Error Rate (real Prometheus queries), and Node/Container Failure (this platform's first live Kubernetes API connection) - live verification caught and fixed 2 real bugs (a Security evaluator that could never fire, and a Container Failure check that missed init containers - confirmed against this platform's own genuinely-still-crashing backend pod) | **Complete** - see [`docs/PHASE_23.md`](docs/PHASE_23.md) |
+| 24 | Converted the platform into a genuine multi-tenant SaaS product: real signup/email-verification/forgot-reset-password/remember-me auth flows; full per-user data isolation across the entire core domain (Project through Alert, including the notification dispatcher's fan-out - previously a deliberately shared, single-organization model); real Azure Monitor + Google Cloud Monitoring metrics sync and Azure Cost Management billing sync alongside the existing AWS integration; a matching SaaS frontend (public Landing Page, rebuilt Sign Up/Login, named-provider onboarding, extended Profile page, full navigation) | **Complete** - see [`docs/PHASE_24.md`](docs/PHASE_24.md) |
 
 ## Known limitations (honestly disclosed, not glossed over)
 
@@ -67,6 +68,22 @@ here as a bullet:
   captured trace_id-correlated log/span pair) but the OTLP export path
   to a real collector (Jaeger/Tempo/an OTel Collector) is verified only
   via a mocked exporter-constructor call, not a real network export.
+- **No live Azure/GCP accounts** - the real Azure Monitor/Cost Management
+  and Google Cloud Monitoring integrations (`app/integrations/azure_monitor.py`,
+  `azure_cost_management.py`, `gcp_monitoring.py`, Phase 24) are verified
+  against each SDK client patched directly (no Azure/GCP emulator exists
+  the way moto emulates AWS), not a live account's real metrics/billing.
+  GCP **cost** sync specifically is not implemented at all - unlike AWS/
+  Azure, GCP has no generalizable spend-by-service API callable with just
+  account credentials (it requires the customer's own BigQuery billing
+  export); this is disclosed via a real `COST_SYNC_PROVIDER_NOT_SUPPORTED`
+  response, not a fabricated integration.
+- **No headless browser tool** - Phase 24's frontend changes were
+  verified via `tsc -b`/Vitest plus direct HTTP/API round-trips against
+  the live running containers (the real register → verify-email → login
+  → profile-update → change-password flow), not a literal screenshot
+  walkthrough - no Playwright/chromium-cli tool was available in this
+  environment.
 
 See [`docs/PHASE_18.md`](docs/PHASE_18.md) and
 [`docs/PHASE_19.md`](docs/PHASE_19.md) for the full detail behind each of

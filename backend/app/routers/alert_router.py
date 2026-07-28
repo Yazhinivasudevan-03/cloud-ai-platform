@@ -45,9 +45,9 @@ def list_alerts_global(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[AlertRead]:
-    return AlertController(db).list_global(deployment_id, status, severity, page, page_size)
+    return AlertController(db).list_global(deployment_id, status, severity, page, page_size, current_user)
 
 
 @router.get(
@@ -63,9 +63,11 @@ def list_alerts(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[AlertRead]:
-    return AlertController(db).list_for_deployment(deployment_id, status, severity, page, page_size)
+    return AlertController(db).list_for_deployment(
+        deployment_id, status, severity, page, page_size, current_user
+    )
 
 
 @router.get(
@@ -77,9 +79,9 @@ def list_alerts(
 def get_alert(
     alert_id: int,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> AlertRead:
-    return AlertController(db).get(alert_id)
+    return AlertController(db).get(alert_id, current_user)
 
 
 @router.patch(
@@ -92,5 +94,10 @@ def get_alert(
         409: {"model": ErrorResponse, "description": "Invalid status transition"},
     },
 )
-def update_alert(alert_id: int, payload: AlertUpdate, db: Session = Depends(get_db)) -> AlertRead:
-    return AlertController(db).update_status(alert_id, payload.status)
+def update_alert(
+    alert_id: int,
+    payload: AlertUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> AlertRead:
+    return AlertController(db).update_status(alert_id, payload.status, current_user)

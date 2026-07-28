@@ -69,20 +69,32 @@ def test_list_and_get_alerts(client, make_user_with_role, db_session):
     )
     db_session.commit()
 
-    viewer_token = make_user_with_role("viewer_user")
+    # The deployment's own owner (any role) can list/get its alerts.
     list_response = client.get(
         f"/api/v1/deployments/{deployment['id']}/alerts",
         params={"severity": "warning"},
-        headers=_auth_header(viewer_token),
+        headers=_auth_header(token),
     )
     assert list_response.status_code == 200
     body = list_response.json()
     assert body["meta"]["total"] == 1
     alert_id = body["items"][0]["id"]
 
-    get_response = client.get(f"/api/v1/alerts/{alert_id}", headers=_auth_header(viewer_token))
+    get_response = client.get(f"/api/v1/alerts/{alert_id}", headers=_auth_header(token))
     assert get_response.status_code == 200
     assert get_response.json()["alert_type"] == "cpu_elevated"
+
+    # A different, non-owning user cannot (Phase 24 per-user isolation).
+    other_token = make_user_with_role("other_viewer_user")
+    forbidden_list = client.get(
+        f"/api/v1/deployments/{deployment['id']}/alerts", headers=_auth_header(other_token)
+    )
+    assert forbidden_list.status_code == 403
+    assert forbidden_list.json()["error"]["code"] == "NOT_YOUR_PROJECT"
+
+    forbidden_get = client.get(f"/api/v1/alerts/{alert_id}", headers=_auth_header(other_token))
+    assert forbidden_get.status_code == 403
+    assert forbidden_get.json()["error"]["code"] == "NOT_YOUR_PROJECT"
 
 
 def test_get_alert_not_found(client, make_user_with_role):

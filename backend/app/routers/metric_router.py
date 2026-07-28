@@ -40,9 +40,13 @@ router = APIRouter(tags=["Metrics"])
 )
 @limiter.limit(settings.RATE_LIMIT_INGESTION)
 def ingest_metric(
-    request: Request, deployment_id: int, payload: MetricCreate, db: Session = Depends(get_db)
+    request: Request,
+    deployment_id: int,
+    payload: MetricCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> MetricRead:
-    return MetricController(db).ingest(deployment_id, payload)
+    return MetricController(db).ingest(deployment_id, payload, current_user)
 
 
 @router.get(
@@ -59,9 +63,11 @@ def list_metrics(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[MetricRead]:
-    return MetricController(db).list(deployment_id, metric_type, since, until, page, page_size)
+    return MetricController(db).list(
+        deployment_id, metric_type, since, until, page, page_size, current_user
+    )
 
 
 @router.post(
@@ -74,9 +80,13 @@ def list_metrics(
 )
 @limiter.limit(settings.RATE_LIMIT_INGESTION)
 def ingest_resource_usage(
-    request: Request, deployment_id: int, payload: ResourceUsageCreate, db: Session = Depends(get_db)
+    request: Request,
+    deployment_id: int,
+    payload: ResourceUsageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> ResourceUsageRead:
-    return ResourceUsageController(db).ingest(deployment_id, payload)
+    return ResourceUsageController(db).ingest(deployment_id, payload, current_user)
 
 
 @router.get(
@@ -92,6 +102,6 @@ def list_resource_usage(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[ResourceUsageRead]:
-    return ResourceUsageController(db).list(deployment_id, since, until, page, page_size)
+    return ResourceUsageController(db).list(deployment_id, since, until, page, page_size, current_user)

@@ -11,7 +11,7 @@ export function NotFoundPage() {
         <Typography variant="body1" color="text.secondary">
           This page doesn't exist.
         </Typography>
-        <Button component={RouterLink} to="/" variant="contained">
+        <Button component={RouterLink} to="/dashboard" variant="contained">
           Back to dashboard
         </Button>
       </Stack>

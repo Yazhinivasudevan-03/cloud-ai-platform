@@ -35,10 +35,10 @@ def list_predictions(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[PredictionRead]:
     return PredictionController(db).list_predictions(
-        deployment_id, metric_type, model_type, since, until, page, page_size
+        deployment_id, metric_type, model_type, since, until, page, page_size, current_user
     )
 
 
@@ -56,10 +56,10 @@ def list_anomaly_detections(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[AnomalyDetectionRead]:
     return PredictionController(db).list_anomaly_detections(
-        deployment_id, is_anomaly, since, until, page, page_size
+        deployment_id, is_anomaly, since, until, page, page_size, current_user
     )
 
 
@@ -77,8 +77,8 @@ def list_failure_predictions(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[FailurePredictionRead]:
     return PredictionController(db).list_failure_predictions(
-        deployment_id, failure_type, since, until, page, page_size
+        deployment_id, failure_type, since, until, page, page_size, current_user
     )

@@ -26,9 +26,12 @@ router = APIRouter(tags=["Microservices"])
     },
 )
 def create_microservice(
-    project_id: int, payload: MicroserviceCreate, db: Session = Depends(get_db)
+    project_id: int,
+    payload: MicroserviceCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> MicroserviceRead:
-    return MicroserviceController(db).create(project_id, payload)
+    return MicroserviceController(db).create(project_id, payload, current_user)
 
 
 @router.get(
@@ -46,10 +49,10 @@ def list_microservices(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[MicroserviceRead]:
     return MicroserviceController(db).list(
-        project_id, name, language, sort_by, order, page, page_size
+        project_id, name, language, sort_by, order, page, page_size, current_user
     )
 
 
@@ -57,14 +60,17 @@ def list_microservices(
     "/microservices/{microservice_id}",
     response_model=MicroserviceRead,
     summary="Get a microservice by ID",
-    responses={404: {"model": ErrorResponse, "description": "Microservice not found"}},
+    responses={
+        403: {"model": ErrorResponse, "description": "Microservice's project belongs to another user"},
+        404: {"model": ErrorResponse, "description": "Microservice not found"},
+    },
 )
 def get_microservice(
     microservice_id: int,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> MicroserviceRead:
-    return MicroserviceController(db).get(microservice_id)
+    return MicroserviceController(db).get(microservice_id, current_user)
 
 
 @router.put(
@@ -73,14 +79,18 @@ def get_microservice(
     summary="Update a microservice (operator/admin)",
     dependencies=[Depends(require_roles("operator", "admin"))],
     responses={
+        403: {"model": ErrorResponse, "description": "Microservice's project belongs to another user"},
         404: {"model": ErrorResponse, "description": "Microservice not found"},
         409: {"model": ErrorResponse, "description": "Microservice name already exists in project"},
     },
 )
 def update_microservice(
-    microservice_id: int, payload: MicroserviceUpdate, db: Session = Depends(get_db)
+    microservice_id: int,
+    payload: MicroserviceUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> MicroserviceRead:
-    return MicroserviceController(db).update(microservice_id, payload)
+    return MicroserviceController(db).update(microservice_id, payload, current_user)
 
 
 @router.delete(
@@ -88,7 +98,14 @@ def update_microservice(
     status_code=204,
     summary="Delete a microservice (admin only)",
     dependencies=[Depends(require_roles("admin"))],
-    responses={404: {"model": ErrorResponse, "description": "Microservice not found"}},
+    responses={
+        403: {"model": ErrorResponse, "description": "Microservice's project belongs to another user"},
+        404: {"model": ErrorResponse, "description": "Microservice not found"},
+    },
 )
-def delete_microservice(microservice_id: int, db: Session = Depends(get_db)) -> None:
-    MicroserviceController(db).delete(microservice_id)
+def delete_microservice(
+    microservice_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> None:
+    MicroserviceController(db).delete(microservice_id, current_user)

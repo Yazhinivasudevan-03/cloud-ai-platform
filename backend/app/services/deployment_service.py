@@ -2,12 +2,14 @@
 from sqlalchemy.orm import Session
 
 from app.models.deployment import Deployment
+from app.models.user import User
 from app.repositories.cloud_account_timezone_repository import CloudAccountTimezoneRepository
 from app.repositories.cloud_provider_account_repository import CloudProviderAccountRepository
 from app.repositories.deployment_repository import DeploymentRepository
 from app.repositories.microservice_repository import MicroserviceRepository
 from app.schemas.deployment import DeploymentCreate, DeploymentUpdate
 from app.utils.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
+from app.utils.ownership import raise_if_cannot_access_project
 
 
 class DeploymentService:
@@ -18,12 +20,13 @@ class DeploymentService:
         self.cloud_account_repository = CloudProviderAccountRepository(db)
         self.cloud_account_timezone_repository = CloudAccountTimezoneRepository(db)
 
-    def _get_microservice_or_404(self, microservice_id: int):
+    def _get_microservice_or_404(self, microservice_id: int, current_user: User):
         microservice = self.microservice_repository.get_by_id(microservice_id)
         if microservice is None:
             raise NotFoundError(
                 f"Microservice {microservice_id} not found", code="MICROSERVICE_NOT_FOUND"
             )
+        raise_if_cannot_access_project(microservice.project, current_user)
         return microservice
 
     def _check_cloud_account_ownership(self, cloud_provider_account_id: int, current_user_id: int) -> None:
@@ -71,9 +74,9 @@ class DeploymentService:
             )
 
     def create(
-        self, microservice_id: int, payload: DeploymentCreate, current_user_id: int
+        self, microservice_id: int, payload: DeploymentCreate, current_user: User
     ) -> Deployment:
-        self._get_microservice_or_404(microservice_id)
+        self._get_microservice_or_404(microservice_id, current_user)
         if (
             self.repository.get_by_microservice_identity(
                 microservice_id, payload.name, payload.namespace
@@ -86,7 +89,7 @@ class DeploymentService:
                 code="DEPLOYMENT_EXISTS",
             )
         if payload.cloud_provider_account_id is not None:
-            self._check_cloud_account_ownership(payload.cloud_provider_account_id, current_user_id)
+            self._check_cloud_account_ownership(payload.cloud_provider_account_id, current_user.id)
         if payload.cloud_account_timezone_id is not None:
             self._check_timezone_belongs_to_account(
                 payload.cloud_account_timezone_id, payload.cloud_provider_account_id
@@ -108,12 +111,13 @@ class DeploymentService:
         )
         return self.repository.create(deployment)
 
-    def get(self, deployment_id: int) -> Deployment:
+    def get(self, deployment_id: int, current_user: User) -> Deployment:
         deployment = self.repository.get_by_id(deployment_id)
         if deployment is None:
             raise NotFoundError(
                 f"Deployment {deployment_id} not found", code="DEPLOYMENT_NOT_FOUND"
             )
+        raise_if_cannot_access_project(deployment.microservice.project, current_user)
         return deployment
 
     def list(
@@ -125,17 +129,26 @@ class DeploymentService:
         order: str,
         page: int,
         page_size: int,
+        current_user: User,
+        cloud_provider_account_id: int | None = None,
     ) -> tuple[list[Deployment], int]:
-        self._get_microservice_or_404(microservice_id)
+        self._get_microservice_or_404(microservice_id, current_user)
         offset = (page - 1) * page_size
         return self.repository.search(
-            microservice_id, status, namespace, sort_by, order, offset, page_size
+            microservice_id,
+            status,
+            namespace,
+            sort_by,
+            order,
+            offset,
+            page_size,
+            cloud_provider_account_id,
         )
 
     def update(
-        self, deployment_id: int, payload: DeploymentUpdate, current_user_id: int
+        self, deployment_id: int, payload: DeploymentUpdate, current_user: User
     ) -> Deployment:
-        deployment = self.get(deployment_id)
+        deployment = self.get(deployment_id, current_user)
         new_name = payload.name if payload.name is not None else deployment.name
         new_namespace = (
             payload.namespace if payload.namespace is not None else deployment.namespace
@@ -167,7 +180,7 @@ class DeploymentService:
         if payload.network_limit_kbps is not None:
             deployment.network_limit_kbps = payload.network_limit_kbps
         if payload.cloud_provider_account_id is not None:
-            self._check_cloud_account_ownership(payload.cloud_provider_account_id, current_user_id)
+            self._check_cloud_account_ownership(payload.cloud_provider_account_id, current_user.id)
             deployment.cloud_provider_account_id = payload.cloud_provider_account_id
         if payload.cloud_resource_identifier is not None:
             deployment.cloud_resource_identifier = payload.cloud_resource_identifier
@@ -180,6 +193,6 @@ class DeploymentService:
         self.db.refresh(deployment)
         return deployment
 
-    def delete(self, deployment_id: int) -> None:
-        deployment = self.get(deployment_id)
+    def delete(self, deployment_id: int, current_user: User) -> None:
+        deployment = self.get(deployment_id, current_user)
         self.repository.delete(deployment)

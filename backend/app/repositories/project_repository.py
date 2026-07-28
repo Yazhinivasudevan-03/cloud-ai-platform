@@ -23,6 +23,7 @@ class ProjectRepository(BaseRepository[Project]):
         order: str,
         offset: int,
         limit: int,
+        owner_id: int | None = None,
     ) -> tuple[list[Project], int]:
         stmt = select(Project)
         count_stmt = select(func.count()).select_from(Project)
@@ -31,6 +32,14 @@ class ProjectRepository(BaseRepository[Project]):
             condition = Project.name.ilike(f"%{name_contains}%")
             stmt = stmt.where(condition)
             count_stmt = count_stmt.where(condition)
+
+        # None means "no owner filter" (Phase 24: only a platform
+        # is_superuser calls list() with no owner_id, so it alone still
+        # sees every tenant's projects) - every other caller passes their
+        # own current_user.id, scoping the list to just their own projects.
+        if owner_id is not None:
+            stmt = stmt.where(Project.owner_id == owner_id)
+            count_stmt = count_stmt.where(Project.owner_id == owner_id)
 
         sort_column = _SORT_COLUMNS.get(sort_by, Project.created_at)
         stmt = stmt.order_by(sort_column.desc() if order == "desc" else sort_column.asc())

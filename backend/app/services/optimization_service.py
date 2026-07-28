@@ -22,6 +22,7 @@ from app.models.cloud_cost import CloudCost
 from app.models.deployment import Deployment
 from app.models.optimization_recommendation import OptimizationRecommendation
 from app.models.resource_usage import ResourceUsage
+from app.models.user import User
 from app.notifications.dispatcher import dispatch
 from app.optimization.cost_forecaster import aggregate_by_month
 from app.optimization.recommendation_engine import evaluate as evaluate_recommendations
@@ -33,6 +34,7 @@ from app.repositories.optimization_recommendation_repository import (
 from app.repositories.prediction_repository import PredictionRepository
 from app.schemas.optimization_recommendation import OptimizationRecommendationStatus
 from app.utils.exceptions import ConflictError, NotFoundError
+from app.utils.ownership import raise_if_cannot_access_project
 
 _CPU_RECOMMENDATION_TYPES = {"increase_pods", "increase_cpu", "scale_deployment", "reduce_pods", "reduce_cpu"}
 _MEMORY_RECOMMENDATION_TYPES = {"increase_memory", "reduce_memory"}
@@ -47,13 +49,14 @@ class OptimizationService:
         self.alert_repository = AlertRepository(db)
         self.settings = get_settings()
 
-    def get(self, recommendation_id: int) -> OptimizationRecommendation:
+    def get(self, recommendation_id: int, current_user: User) -> OptimizationRecommendation:
         recommendation = self.repository.get_by_id(recommendation_id)
         if recommendation is None:
             raise NotFoundError(
                 f"Optimization recommendation {recommendation_id} not found",
                 code="OPTIMIZATION_RECOMMENDATION_NOT_FOUND",
             )
+        raise_if_cannot_access_project(recommendation.deployment.microservice.project, current_user)
         return recommendation
 
     def list_for_deployment(
@@ -63,11 +66,14 @@ class OptimizationService:
         recommendation_type: str | None,
         page: int,
         page_size: int,
+        current_user: User,
     ) -> tuple[list[OptimizationRecommendation], int]:
-        if self.deployment_repository.get_by_id(deployment_id) is None:
+        deployment = self.deployment_repository.get_by_id(deployment_id)
+        if deployment is None:
             raise NotFoundError(
                 f"Deployment {deployment_id} not found", code="DEPLOYMENT_NOT_FOUND"
             )
+        raise_if_cannot_access_project(deployment.microservice.project, current_user)
         offset = (page - 1) * page_size
         return self.repository.search(deployment_id, status, recommendation_type, offset, page_size)
 
@@ -78,20 +84,30 @@ class OptimizationService:
         recommendation_type: str | None,
         page: int,
         page_size: int,
+        current_user: User,
     ) -> tuple[list[OptimizationRecommendation], int]:
         """Cross-deployment listing for dashboard-level views - `deployment_id`
-        is an optional filter here, not a required scope."""
-        if deployment_id is not None and self.deployment_repository.get_by_id(deployment_id) is None:
-            raise NotFoundError(
-                f"Deployment {deployment_id} not found", code="DEPLOYMENT_NOT_FOUND"
-            )
+        is an optional filter here, not a required scope. Phase 24: scoped
+        to the current user's own deployments unless they're a platform
+        is_superuser (owner_id=None -> no filter - see
+        OptimizationRecommendationRepository.search)."""
+        if deployment_id is not None:
+            deployment = self.deployment_repository.get_by_id(deployment_id)
+            if deployment is None:
+                raise NotFoundError(
+                    f"Deployment {deployment_id} not found", code="DEPLOYMENT_NOT_FOUND"
+                )
+            raise_if_cannot_access_project(deployment.microservice.project, current_user)
         offset = (page - 1) * page_size
-        return self.repository.search(deployment_id, status, recommendation_type, offset, page_size)
+        owner_id = None if current_user.is_superuser else current_user.id
+        return self.repository.search(
+            deployment_id, status, recommendation_type, offset, page_size, owner_id
+        )
 
     def update_status(
-        self, recommendation_id: int, new_status: OptimizationRecommendationStatus
+        self, recommendation_id: int, new_status: OptimizationRecommendationStatus, current_user: User
     ) -> OptimizationRecommendation:
-        recommendation = self.get(recommendation_id)
+        recommendation = self.get(recommendation_id, current_user)
         if recommendation.status != "pending":
             raise ConflictError(
                 f"Cannot transition recommendation from '{recommendation.status}' to "

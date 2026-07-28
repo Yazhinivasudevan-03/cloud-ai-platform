@@ -54,6 +54,7 @@ class DeploymentRepository(BaseRepository[Deployment]):
         order: str,
         offset: int,
         limit: int,
+        cloud_provider_account_id: int | None = None,
     ) -> tuple[list[Deployment], int]:
         stmt = select(Deployment).where(Deployment.microservice_id == microservice_id)
         count_stmt = (
@@ -68,6 +69,14 @@ class DeploymentRepository(BaseRepository[Deployment]):
             count_stmt = count_stmt.where(condition)
         if namespace:
             condition = Deployment.namespace == namespace
+            stmt = stmt.where(condition)
+            count_stmt = count_stmt.where(condition)
+        # Multi-account filtering (Phase 24): narrows the listing to
+        # deployments linked to one specific cloud provider account - the
+        # dashboard's account switcher uses this to show "just this
+        # account" instead of every one of the user's own deployments.
+        if cloud_provider_account_id is not None:
+            condition = Deployment.cloud_provider_account_id == cloud_provider_account_id
             stmt = stmt.where(condition)
             count_stmt = count_stmt.where(condition)
 

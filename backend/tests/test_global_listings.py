@@ -54,17 +54,24 @@ def test_global_alerts_listing_spans_multiple_deployments(client, make_user_with
     )
     db_session.commit()
 
-    viewer_token = make_user_with_role("viewer_user")
-    response = client.get("/api/v1/alerts", headers=_auth_header(viewer_token))
+    # The deployments' own owner sees both (Phase 24: global listing is
+    # scoped to the current user's own alerts, not every deployment's).
+    response = client.get("/api/v1/alerts", headers=_auth_header(operator_token))
     assert response.status_code == 200
     assert response.json()["meta"]["total"] == 2
 
     filtered = client.get(
-        "/api/v1/alerts", params={"deployment_id": deployment_a["id"]}, headers=_auth_header(viewer_token)
+        "/api/v1/alerts", params={"deployment_id": deployment_a["id"]}, headers=_auth_header(operator_token)
     )
     assert filtered.status_code == 200
     assert filtered.json()["meta"]["total"] == 1
     assert filtered.json()["items"][0]["deployment_id"] == deployment_a["id"]
+
+    # A different, non-owning user sees none of them.
+    other_token = make_user_with_role("other_viewer_user")
+    isolated = client.get("/api/v1/alerts", headers=_auth_header(other_token))
+    assert isolated.status_code == 200
+    assert isolated.json()["meta"]["total"] == 0
 
 
 def test_global_alerts_listing_404s_on_bad_deployment_filter(client, make_user_with_role):
@@ -101,16 +108,23 @@ def test_global_optimization_recommendations_listing_spans_multiple_deployments(
     )
     db_session.commit()
 
-    viewer_token = make_user_with_role("viewer_user")
-    response = client.get("/api/v1/optimization-recommendations", headers=_auth_header(viewer_token))
+    # The deployments' own owner sees both (Phase 24: global listing is
+    # scoped to the current user's own deployments, not every deployment).
+    response = client.get("/api/v1/optimization-recommendations", headers=_auth_header(operator_token))
     assert response.status_code == 200
     assert response.json()["meta"]["total"] == 2
 
     filtered = client.get(
         "/api/v1/optimization-recommendations",
         params={"status": "pending"},
-        headers=_auth_header(viewer_token),
+        headers=_auth_header(operator_token),
     )
     assert filtered.status_code == 200
     assert filtered.json()["meta"]["total"] == 1
     assert filtered.json()["items"][0]["recommendation_type"] == "increase_pods"
+
+    # A different, non-owning user sees none of them.
+    other_token = make_user_with_role("other_viewer_user")
+    isolated = client.get("/api/v1/optimization-recommendations", headers=_auth_header(other_token))
+    assert isolated.status_code == 200
+    assert isolated.json()["meta"]["total"] == 0

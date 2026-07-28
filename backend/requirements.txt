@@ -16,6 +16,11 @@ prometheus-fastapi-instrumentator==8.0.2
 apscheduler==3.10.4
 httpx==0.28.1
 boto3==1.43.51
+azure-identity==1.19.0
+azure-monitor-query==1.4.1
+azure-mgmt-costmanagement==4.0.1
+google-cloud-monitoring==2.23.1
+google-auth==2.37.0
 kubernetes==31.0.0
 tenacity==9.0.0
 opentelemetry-api==1.44.0

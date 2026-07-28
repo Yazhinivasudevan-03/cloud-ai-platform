@@ -90,6 +90,11 @@ def _add_resource_usage(
 def test_cpu_warning_threshold_creates_alert_and_notifies_admin(
     db_session, demo_deployment, admin_user
 ):
+    """Phase 24: the recipient is the deployment's own project owner, not
+    the unrelated admin_user fixture (which exists here only to prove that
+    user - despite holding the admin role - does NOT get notified for
+    someone else's deployment, a direct per-tenant isolation check)."""
+    owner = demo_deployment.microservice.project.owner
     _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=65.0)
 
     summary = AlertEvaluationService(db_session).evaluate_all()
@@ -102,19 +107,20 @@ def test_cpu_warning_threshold_creates_alert_and_notifies_admin(
 
     notifications = db_session.query(Notification).filter(Notification.alert_id == alert.id).all()
     assert len(notifications) == 1
-    assert notifications[0].user_id == admin_user.id
+    assert notifications[0].user_id == owner.id
     assert notifications[0].channel == "dashboard"
 
 
 def test_alert_notifies_admin_via_sms_when_twilio_configured_and_phone_number_set(
-    db_session, demo_deployment, admin_user, monkeypatch
+    db_session, demo_deployment, monkeypatch
 ):
     """Proves the SMS channel (Phase 19) is genuinely wired into the same
     fan-out every other channel goes through, not just unit-tested in
-    isolation - an admin with a phone_number on file and sms_enabled in
-    their NotificationSetting (Phase 20 - off by default) gets a real "sms"
-    Notification row once Twilio is configured, mirroring how the
-    pre-existing "dashboard" channel test above proves the base wiring."""
+    isolation - the deployment's own owner, with a phone_number on file
+    and sms_enabled in their NotificationSetting (Phase 20 - off by
+    default), gets a real "sms" Notification row once Twilio is
+    configured, mirroring how the pre-existing "dashboard" channel test
+    above proves the base wiring."""
     from unittest.mock import MagicMock, patch
 
     from app.config.settings import get_settings
@@ -124,8 +130,9 @@ def test_alert_notifies_admin_via_sms_when_twilio_configured_and_phone_number_se
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
     monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
-    admin_user.phone_number = "+14155552671"
-    db_session.add(NotificationSetting(user_id=admin_user.id, sms_enabled=True))
+    owner = demo_deployment.microservice.project.owner
+    owner.phone_number = "+14155552671"
+    db_session.add(NotificationSetting(user_id=owner.id, sms_enabled=True))
     db_session.commit()
 
     _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=65.0)
@@ -315,11 +322,12 @@ def test_cpu_saturated_uses_highest_tier(db_session, demo_deployment, admin_user
     ],
 )
 def test_cpu_threshold_boundaries_are_inclusive(
-    db_session, demo_deployment, admin_user, cpu_usage_percent, expected_type, expected_severity
+    db_session, demo_deployment, cpu_usage_percent, expected_type, expected_severity
 ):
     """ALERT_CPU_WARNING/CRITICAL/SATURATED_THRESHOLD default to 60/80/100 -
     verifies the >= comparisons in _cpu_condition() land on the correct tier
     at the exact boundary value, not just comfortably inside each band."""
+    owner = demo_deployment.microservice.project.owner
     _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=cpu_usage_percent)
 
     summary = AlertEvaluationService(db_session).evaluate_all()
@@ -335,7 +343,7 @@ def test_cpu_threshold_boundaries_are_inclusive(
 
     notifications = db_session.query(Notification).filter(Notification.alert_id == alert.id).all()
     assert len(notifications) == 1
-    assert notifications[0].user_id == admin_user.id
+    assert notifications[0].user_id == owner.id
 
 
 def test_severity_escalation_resolves_old_alert_and_creates_new_one(
@@ -451,7 +459,23 @@ def test_high_failure_probability_creates_critical_alert(db_session, demo_deploy
     assert alert.severity == "critical"
 
 
-def test_no_admin_users_skips_notification_without_error(db_session, demo_deployment):
+def test_deployment_owner_is_notified_even_with_no_separate_admin_users(db_session, demo_deployment):
+    """Phase 24: notification no longer depends on a separate admin-role
+    user existing at all - the deployment's own owner is always the real
+    recipient (see dispatcher.py's _recipients())."""
+    _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=65.0)
+
+    summary = AlertEvaluationService(db_session).evaluate_all()
+
+    assert summary["alerts_created"] == 1
+    assert summary["notifications_sent"] == 1
+
+
+def test_inactive_owner_skips_notification_without_error(db_session, demo_deployment):
+    owner = demo_deployment.microservice.project.owner
+    owner.is_active = False
+    db_session.commit()
+
     _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=65.0)
 
     summary = AlertEvaluationService(db_session).evaluate_all()

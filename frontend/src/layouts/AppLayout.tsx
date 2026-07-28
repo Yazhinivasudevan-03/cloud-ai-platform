@@ -19,6 +19,12 @@ import {
 import MenuIcon from "@mui/icons-material/Menu";
 import CloudQueueIcon from "@mui/icons-material/CloudQueue";
 import DashboardIcon from "@mui/icons-material/DashboardOutlined";
+import FolderIcon from "@mui/icons-material/FolderOutlined";
+import NotificationsActiveIcon from "@mui/icons-material/NotificationsActiveOutlined";
+import TuneIcon from "@mui/icons-material/TuneOutlined";
+import CloudQueueOutlinedIcon from "@mui/icons-material/CloudQueueOutlined";
+import MailOutlineIcon from "@mui/icons-material/MailOutline";
+import AccountCircleIcon from "@mui/icons-material/AccountCircleOutlined";
 import PeopleIcon from "@mui/icons-material/PeopleOutlined";
 import Brightness4Icon from "@mui/icons-material/Brightness4";
 import Brightness7Icon from "@mui/icons-material/Brightness7";
@@ -29,11 +35,18 @@ import { UserMenu } from "@/components/UserMenu";
 
 const DRAWER_WIDTH = 240;
 
-// Projects/Alerts/Optimization/Notifications/Cloud Accounts are reached
-// from the Dashboard itself (stat cards + the Cloud Accounts panel) - see
-// docs/PHASE_16.md - so the sidebar stays down to just the two entry
-// points that aren't already covered there.
-const NAV_ITEMS = [{ label: "Dashboard", to: "/", icon: <DashboardIcon /> }];
+// Professional SaaS navigation (Phase 24): every major section gets its
+// own sidebar entry rather than being reachable only indirectly via
+// Dashboard stat cards (the pre-Phase-24 design - see docs/PHASE_16.md).
+const NAV_ITEMS = [
+  { label: "Dashboard", to: "/dashboard", icon: <DashboardIcon /> },
+  { label: "Projects", to: "/projects", icon: <FolderIcon /> },
+  { label: "Alerts", to: "/alerts", icon: <NotificationsActiveIcon /> },
+  { label: "Optimization", to: "/optimization", icon: <TuneIcon /> },
+  { label: "Cloud Accounts", to: "/cloud-accounts", icon: <CloudQueueOutlinedIcon /> },
+  { label: "Notifications", to: "/notifications", icon: <MailOutlineIcon /> },
+  { label: "Profile", to: "/profile", icon: <AccountCircleIcon /> },
+];
 
 export function AppLayout() {
   const theme = useTheme();
@@ -62,7 +75,6 @@ export function AppLayout() {
             key={item.to}
             component={NavLink}
             to={item.to}
-            end={item.to === "/"}
             selected={location.pathname === item.to}
             sx={{ borderRadius: 2, mb: 0.5 }}
             onClick={() => setMobileOpen(false)}

@@ -59,9 +59,13 @@ def test_sync_project_cloud_costs_succeeds_with_no_data_from_a_fresh_fake_accoun
 
 
 def test_sync_fails_clearly_for_unsupported_provider(client, make_user_with_role, db_session):
+    # "azure" is now a real, supported cost-sync provider (see
+    # azure_cost_management.py) - "gcp" remains genuinely unsupported for
+    # cost sync specifically (no generalizable billing API - see
+    # CloudCostService._PROVIDER_COST_FETCHERS's own docstring).
     token = make_user_with_role("cost_sync_op_b", "operator")
     me = client.get("/api/v1/auth/me", headers=_auth_header(token)).json()
-    account = _make_cloud_account(db_session, me["id"], provider="azure")
+    account = _make_cloud_account(db_session, me["id"], provider="gcp")
     project = _make_project(client, token, "b")
 
     response = client.post(
@@ -143,7 +147,10 @@ def test_repeated_sync_does_not_duplicate_already_stored_months(
         is not None
     )
 
-    created = CloudCostService(db_session).sync_from_aws(project["id"], account.id, me["id"])
+    from app.models.user import User as UserModel
+
+    current_user = db_session.query(UserModel).filter(UserModel.id == me["id"]).one()
+    created = CloudCostService(db_session).sync_cloud_costs(project["id"], account.id, current_user)
     assert created == []  # moto returns no new data, and the pre-seeded month must not duplicate
 
     all_costs = CloudCostService(db_session).repository.list_all_for_project(project["id"])

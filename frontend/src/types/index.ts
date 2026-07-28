@@ -40,6 +40,11 @@ export interface User {
   email: string;
   full_name: string | null;
   phone_number: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  company_name: string | null;
+  country: string | null;
+  email_verified: boolean;
   is_active: boolean;
   is_superuser: boolean;
   roles: Role[];
@@ -48,12 +53,52 @@ export interface User {
 export interface UserProfileUpdate {
   full_name?: string | null;
   phone_number?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  company_name?: string | null;
+  country?: string | null;
 }
 
 export interface TokenPair {
   access_token: string;
   refresh_token: string;
   token_type: string;
+}
+
+// --- Sign up / email verification / password reset (Phase 24) ----------
+
+export interface RegisterPayload {
+  first_name: string;
+  last_name: string;
+  email: string;
+  mobile_number: string;
+  company_name?: string;
+  country: string;
+  password: string;
+  confirm_password: string;
+}
+
+// Identical to User, plus a one-time email-verification token/link - real
+// SMTP delivery isn't wired up in this environment, so the raw token/link
+// is returned here for the "check your email" screen to show directly.
+export interface RegisterResponse extends User {
+  verification_token: string;
+  verification_link: string;
+}
+
+export interface MessageResponse {
+  message: string;
+}
+
+export interface EmailVerificationResult {
+  email_verified: boolean;
+  message: string;
+}
+
+export interface ChangePasswordPayload {
+  current_password: string;
+  new_password: string;
+  confirm_new_password: string;
 }
 
 export type RoleName = "viewer" | "operator" | "admin";

@@ -2,11 +2,10 @@
 cloud provider account, replacing manually-posted/synthetic resource_usage
 data with genuine cloud provider metrics (Phase 12).
 
-Only the "aws" provider is wired to a real integration in this pass (see
-app/integrations/aws_cloudwatch.py) - any other provider value raises a
-clear, honest CLOUD_SYNC_PROVIDER_NOT_SUPPORTED error rather than silently
-doing nothing, since Azure/GCP support would need their own dedicated SDK
-integration modules following the same pattern (see docs/PHASE_12.md).
+"aws", "azure" and "gcp" are wired to real integrations (see
+app/integrations/aws_cloudwatch.py, azure_monitor.py, gcp_monitoring.py) -
+any other provider value raises a clear, honest
+CLOUD_SYNC_PROVIDER_NOT_SUPPORTED error rather than silently doing nothing.
 """
 from datetime import datetime, timezone
 
@@ -14,6 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.config.settings import get_settings
 from app.integrations.aws_cloudwatch import fetch_ec2_resource_usage
+from app.integrations.azure_monitor import fetch_vm_resource_usage
+from app.integrations.gcp_monitoring import fetch_instance_resource_usage
 from app.models.deployment import Deployment
 from app.models.resource_usage import ResourceUsage
 from app.repositories.cloud_provider_account_repository import CloudProviderAccountRepository
@@ -28,6 +29,8 @@ logger = get_logger("cloud_sync")
 
 _PROVIDER_FETCHERS = {
     "aws": fetch_ec2_resource_usage,
+    "azure": fetch_vm_resource_usage,
+    "gcp": fetch_instance_resource_usage,
 }
 
 

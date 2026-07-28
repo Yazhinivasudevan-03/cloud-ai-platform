@@ -8,7 +8,9 @@ imports AUTH_SCHEMA from here to fully-qualify its ForeignKey target,
 since MySQL requires cross-database foreign keys to name the schema
 explicitly.
 """
-from sqlalchemy import Boolean, Column, ForeignKey, Index, Integer, String, Table, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Table, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.config.settings import get_settings
@@ -60,10 +62,43 @@ class User(TimestampMixin, Base):
     phone_number: Mapped[str | None] = mapped_column(
         String(20),
         nullable=True,
-        doc="E.164 format (e.g. +14155552671) - required for the sms notification channel (Phase 19).",
+        doc="E.164 format (e.g. +14155552671) - required for the sms notification channel (Phase 19). "
+        "Also doubles as the signup form's 'Mobile Number' field (Phase 24) - not duplicated.",
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_superuser: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        doc="The actual platform operator flag (Phase 24) - distinct from the 'admin' role, which is "
+        "now a tenant's own app-management capability, not a cross-tenant data-access bypass. Only "
+        "is_superuser can see platform-wide, unowned alerts (API Latency/Error Rate/Node Failure/"
+        "Container Failure).",
+    )
+
+    # Signup fields (Phase 24) - multi-tenant SaaS onboarding. Nullable so
+    # existing pre-Phase-24 users are unaffected; new registrations require
+    # them via UserCreate's own validation.
+    first_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    company_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(60), nullable=True)
+
+    # Email verification (Phase 24). Existing pre-Phase-24 users are
+    # backfilled to already-verified by the migration (server_default),
+    # so nobody already using the platform gets locked out; new
+    # registrations default to unverified at the Python/ORM level and
+    # must verify before their first login. The token is stored as a
+    # SHA-256 hash, never in plaintext - mirrors why passwords are hashed,
+    # not reversible, even though this is a random opaque token rather
+    # than a low-entropy secret a user chose themselves.
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    email_verification_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    email_verification_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Password reset (Phase 24) - same hashed-token convention.
+    password_reset_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    password_reset_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     roles: Mapped[list["Role"]] = relationship(
         "Role", secondary=user_roles, back_populates="users", lazy="selectin"

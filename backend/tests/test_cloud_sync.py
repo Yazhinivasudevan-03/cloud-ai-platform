@@ -131,9 +131,11 @@ def test_sync_fails_clearly_when_deployment_has_no_cloud_link(client, make_user_
 
 
 def test_sync_fails_clearly_for_unsupported_provider(client, make_user_with_role, db_session):
+    # "azure"/"gcp" are now real, supported providers (see azure_monitor.py/
+    # gcp_monitoring.py) - "oracle" remains genuinely unimplemented.
     token = make_user_with_role("cloud_sync_op_c", "operator")
     me = client.get("/api/v1/auth/me", headers=_auth_header(token)).json()
-    account = _make_cloud_account(db_session, me["id"], provider="azure")
+    account = _make_cloud_account(db_session, me["id"], provider="oracle")
     deployment = _make_deployment(client, token, "c")
 
     client.put(

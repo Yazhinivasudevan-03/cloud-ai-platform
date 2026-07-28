@@ -3,6 +3,7 @@ import math
 
 from sqlalchemy.orm import Session
 
+from app.models.user import User
 from app.schemas.common import PaginatedResponse, PaginationMeta
 from app.schemas.optimization_recommendation import (
     OptimizationEvaluationSummary,
@@ -16,8 +17,10 @@ class OptimizationController:
     def __init__(self, db: Session):
         self.service = OptimizationService(db)
 
-    def get(self, recommendation_id: int) -> OptimizationRecommendationRead:
-        return OptimizationRecommendationRead.model_validate(self.service.get(recommendation_id))
+    def get(self, recommendation_id: int, current_user: User) -> OptimizationRecommendationRead:
+        return OptimizationRecommendationRead.model_validate(
+            self.service.get(recommendation_id, current_user)
+        )
 
     def list_for_deployment(
         self,
@@ -26,9 +29,10 @@ class OptimizationController:
         recommendation_type: str | None,
         page: int,
         page_size: int,
+        current_user: User,
     ) -> PaginatedResponse[OptimizationRecommendationRead]:
         items, total = self.service.list_for_deployment(
-            deployment_id, status, recommendation_type, page, page_size
+            deployment_id, status, recommendation_type, page, page_size, current_user
         )
         total_pages = math.ceil(total / page_size) if page_size else 0
         return PaginatedResponse[OptimizationRecommendationRead](
@@ -45,9 +49,10 @@ class OptimizationController:
         recommendation_type: str | None,
         page: int,
         page_size: int,
+        current_user: User,
     ) -> PaginatedResponse[OptimizationRecommendationRead]:
         items, total = self.service.list_global(
-            deployment_id, status, recommendation_type, page, page_size
+            deployment_id, status, recommendation_type, page, page_size, current_user
         )
         total_pages = math.ceil(total / page_size) if page_size else 0
         return PaginatedResponse[OptimizationRecommendationRead](
@@ -58,10 +63,10 @@ class OptimizationController:
         )
 
     def update_status(
-        self, recommendation_id: int, new_status: OptimizationRecommendationStatus
+        self, recommendation_id: int, new_status: OptimizationRecommendationStatus, current_user: User
     ) -> OptimizationRecommendationRead:
         return OptimizationRecommendationRead.model_validate(
-            self.service.update_status(recommendation_id, new_status)
+            self.service.update_status(recommendation_id, new_status, current_user)
         )
 
     def evaluate(self) -> OptimizationEvaluationSummary:

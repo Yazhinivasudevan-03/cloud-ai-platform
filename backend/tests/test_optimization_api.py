@@ -73,26 +73,42 @@ def test_list_and_get_and_apply_recommendation(client, make_user_with_role, db_s
     db_session.commit()
     db_session.refresh(recommendation)
 
-    viewer_token = make_user_with_role("viewer_user")
+    # The deployment's own owner (any role) can list/get it.
     list_response = client.get(
         f"/api/v1/deployments/{deployment['id']}/optimization-recommendations",
         params={"status": "pending"},
-        headers=_auth_header(viewer_token),
+        headers=_auth_header(operator_token),
     )
     assert list_response.status_code == 200
     assert list_response.json()["meta"]["total"] == 1
 
     get_response = client.get(
         f"/api/v1/optimization-recommendations/{recommendation.id}",
-        headers=_auth_header(viewer_token),
+        headers=_auth_header(operator_token),
     )
     assert get_response.status_code == 200
     assert get_response.json()["recommendation_type"] == "increase_pods"
 
+    # A different, non-owning user cannot (Phase 24 per-user isolation).
+    other_token = make_user_with_role("other_viewer_user")
+    forbidden_list = client.get(
+        f"/api/v1/deployments/{deployment['id']}/optimization-recommendations",
+        headers=_auth_header(other_token),
+    )
+    assert forbidden_list.status_code == 403
+    assert forbidden_list.json()["error"]["code"] == "NOT_YOUR_PROJECT"
+
+    forbidden_get = client.get(
+        f"/api/v1/optimization-recommendations/{recommendation.id}",
+        headers=_auth_header(other_token),
+    )
+    assert forbidden_get.status_code == 403
+    assert forbidden_get.json()["error"]["code"] == "NOT_YOUR_PROJECT"
+
     forbidden_apply = client.patch(
         f"/api/v1/optimization-recommendations/{recommendation.id}",
         json={"status": "applied"},
-        headers=_auth_header(viewer_token),
+        headers=_auth_header(other_token),
     )
     assert forbidden_apply.status_code == 403
 

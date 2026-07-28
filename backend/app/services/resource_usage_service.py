@@ -4,10 +4,12 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.models.resource_usage import ResourceUsage
+from app.models.user import User
 from app.repositories.deployment_repository import DeploymentRepository
 from app.repositories.resource_usage_repository import ResourceUsageRepository
 from app.schemas.resource_usage import ResourceUsageCreate
 from app.utils.exceptions import NotFoundError
+from app.utils.ownership import raise_if_cannot_access_project
 
 
 class ResourceUsageService:
@@ -16,16 +18,17 @@ class ResourceUsageService:
         self.repository = ResourceUsageRepository(db)
         self.deployment_repository = DeploymentRepository(db)
 
-    def _get_deployment_or_404(self, deployment_id: int):
+    def _get_deployment_or_404(self, deployment_id: int, current_user: User):
         deployment = self.deployment_repository.get_by_id(deployment_id)
         if deployment is None:
             raise NotFoundError(
                 f"Deployment {deployment_id} not found", code="DEPLOYMENT_NOT_FOUND"
             )
+        raise_if_cannot_access_project(deployment.microservice.project, current_user)
         return deployment
 
-    def ingest(self, deployment_id: int, payload: ResourceUsageCreate) -> ResourceUsage:
-        self._get_deployment_or_404(deployment_id)
+    def ingest(self, deployment_id: int, payload: ResourceUsageCreate, current_user: User) -> ResourceUsage:
+        self._get_deployment_or_404(deployment_id, current_user)
         usage = ResourceUsage(
             deployment_id=deployment_id,
             cpu_usage_percent=payload.cpu_usage_percent,
@@ -44,7 +47,8 @@ class ResourceUsageService:
         until: datetime | None,
         page: int,
         page_size: int,
+        current_user: User,
     ) -> tuple[list[ResourceUsage], int]:
-        self._get_deployment_or_404(deployment_id)
+        self._get_deployment_or_404(deployment_id, current_user)
         offset = (page - 1) * page_size
         return self.repository.search(deployment_id, since, until, offset, page_size)

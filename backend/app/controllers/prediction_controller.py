@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.models.user import User
 from app.schemas.anomaly_detection import AnomalyDetectionRead
 from app.schemas.common import PaginatedResponse, PaginationMeta
 from app.schemas.failure_prediction import FailurePredictionRead
@@ -24,9 +25,10 @@ class PredictionController:
         until: datetime | None,
         page: int,
         page_size: int,
+        current_user: User,
     ) -> PaginatedResponse[PredictionRead]:
         items, total = self.service.list_predictions(
-            deployment_id, metric_type, model_type, since, until, page, page_size
+            deployment_id, metric_type, model_type, since, until, page, page_size, current_user
         )
         total_pages = math.ceil(total / page_size) if page_size else 0
         return PaginatedResponse[PredictionRead](
@@ -44,9 +46,10 @@ class PredictionController:
         until: datetime | None,
         page: int,
         page_size: int,
+        current_user: User,
     ) -> PaginatedResponse[AnomalyDetectionRead]:
         items, total = self.service.list_anomaly_detections(
-            deployment_id, is_anomaly, since, until, page, page_size
+            deployment_id, is_anomaly, since, until, page, page_size, current_user
         )
         total_pages = math.ceil(total / page_size) if page_size else 0
         return PaginatedResponse[AnomalyDetectionRead](
@@ -64,9 +67,10 @@ class PredictionController:
         until: datetime | None,
         page: int,
         page_size: int,
+        current_user: User,
     ) -> PaginatedResponse[FailurePredictionRead]:
         items, total = self.service.list_failure_predictions(
-            deployment_id, failure_type, since, until, page, page_size
+            deployment_id, failure_type, since, until, page, page_size, current_user
         )
         total_pages = math.ceil(total / page_size) if page_size else 0
         return PaginatedResponse[FailurePredictionRead](

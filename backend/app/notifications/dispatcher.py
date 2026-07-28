@@ -1,21 +1,34 @@
-"""Fan-out: given a newly created Alert, notify every admin user according
-to their own NotificationSetting (Phase 20) - channel opt-in, do-not-disturb
-window, and per-user Telegram/Slack/Teams credential overrides.
+"""Fan-out: given a newly created Alert, notify the alert's actual owner(s)
+according to their own NotificationSetting (Phase 20) - channel opt-in,
+do-not-disturb window, and per-user Telegram/Slack/Teams credential
+overrides.
+
+Phase 24: this used to notify every admin-role user platform-wide,
+matching the old shared-organization model where any admin could act on
+any alert. Now that data is fully tenant-isolated, an alert is only ever
+relevant to the tenant it actually belongs to - see `_recipients()` below
+for how each of Alert's scopes (deployment/project/user/platform-wide)
+resolves to its real owner(s). A platform is_superuser is not
+additionally notified for other tenants' scoped alerts (they can still
+see everything via the global listing endpoints, just aren't paged for
+it) - mirrors how a real SaaS platform operator isn't paged per-customer.
 
 Dashboard notifications are always recorded regardless of any preference
 below (the `Notification` row itself *is* the dashboard entry - a user's
 in-app inbox should never silently lose an alert just because they were in
 a do-not-disturb window; DND only suppresses the out-of-band pings).
 
-Email and SMS are inherently per-user (each admin has their own
+Email and SMS are inherently per-user (each recipient has their own
 address/phone_number). Telegram/Slack/Teams *can* be per-user (a personal
 bot chat ID or webhook) or fall back to a platform-wide shared destination
-(Telegram bot token, Slack webhook) - when multiple admins resolve to the
-exact same destination (e.g. everyone sharing the one global Slack
+(Telegram bot token, Slack webhook) - when multiple recipients resolve to
+the exact same destination (e.g. everyone sharing the one global Slack
 webhook, which is the default when nobody has configured their own), that
-destination is only ever posted to once per alert, not once per admin, so
-a shared channel doesn't get spammed with duplicate copies of the same
-message.
+destination is only ever posted to once per alert, not once per recipient,
+so a shared channel doesn't get spammed with duplicate copies of the same
+message. In practice this now rarely applies (deployment/project/user-
+scoped alerts resolve to a single recipient), but still matters for the
+platform-wide case, where every is_superuser is notified.
 """
 from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -26,7 +39,7 @@ from sqlalchemy.orm import Session
 from app.models.alert import Alert
 from app.models.notification import Notification
 from app.models.notification_setting import NotificationSetting
-from app.models.user import Role, User, user_roles
+from app.models.user import User
 from app.notifications.alert_preferences import load_preferences, wants_notification
 from app.notifications.email_notifier import send_email
 from app.notifications.slack_notifier import send_slack_message
@@ -62,14 +75,32 @@ def _enrich_message(alert: Alert) -> str:
     return "\n".join(lines)
 
 
-def _admin_users(db: Session) -> list[User]:
-    stmt = (
-        select(User)
-        .join(user_roles, user_roles.c.user_id == User.id)
-        .join(Role, Role.id == user_roles.c.role_id)
-        .where(Role.name == "admin", User.is_active.is_(True))
-    )
+def _superusers(db: Session) -> list[User]:
+    stmt = select(User).where(User.is_superuser.is_(True), User.is_active.is_(True))
     return list(db.scalars(stmt).unique().all())
+
+
+def _recipients(db: Session, alert: Alert) -> list[User]:
+    """Resolves an alert's real owner(s) (Phase 24) - each of Alert's
+    mutually-exclusive scopes maps to a single tenant (or, for a genuinely
+    platform-wide alert, every platform is_superuser):
+    - deployment-scoped -> the deployment's project owner
+    - project-scoped (cost alerts) -> that project's owner
+    - user-scoped (security alerts) -> that same user
+    - platform-wide (all three null - API Latency/Error Rate/Node Failure/
+      Container Failure) -> every is_superuser
+    An inactive resolved owner is excluded (mirrors _superusers' own
+    is_active filter for the platform-wide case)."""
+    if alert.deployment_id is not None:
+        owner = alert.deployment.microservice.project.owner
+        return [owner] if owner.is_active else []
+    if alert.project_id is not None:
+        owner = alert.project.owner
+        return [owner] if owner.is_active else []
+    if alert.user_id is not None:
+        user = alert.user
+        return [user] if user is not None and user.is_active else []
+    return _superusers(db)
 
 
 def _in_dnd_window(setting: NotificationSetting, now_utc: datetime) -> bool:
@@ -88,12 +119,13 @@ def _in_dnd_window(setting: NotificationSetting, now_utc: datetime) -> bool:
 
 
 def dispatch(db: Session, alert: Alert) -> int:
-    """Notify every admin user across every channel they've enabled, unless
-    they're in their own do-not-disturb window. Returns the number of
-    Notification rows created."""
-    admins = _admin_users(db)
-    if not admins:
-        logger.warning("No active admin users to notify for alert %s", alert.id)
+    """Notify the alert's real owner(s) (Phase 24 - see _recipients())
+    across every channel they've enabled, unless they're in their own
+    do-not-disturb window. Returns the number of Notification rows
+    created."""
+    recipients = _recipients(db, alert)
+    if not recipients:
+        logger.warning("No active recipient to notify for alert %s", alert.id)
         return 0
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -107,7 +139,7 @@ def dispatch(db: Session, alert: Alert) -> int:
     teams_delivered_by_webhook: dict[str, bool] = {}
 
     created = 0
-    for user in admins:
+    for user in recipients:
         setting = setting_repository.get_or_create(user.id)
         db.add(
             Notification(

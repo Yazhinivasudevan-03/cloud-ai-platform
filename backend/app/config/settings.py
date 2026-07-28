@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # "Remember Me" (Phase 24) - a much longer-lived refresh token issued
+    # only when the user opts in at login.
+    REMEMBER_ME_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # Cloud provider account credential encryption (see app/utils/crypto.py) -
     # deliberately a separate secret from SECRET_KEY: the JWT signing key and
@@ -45,6 +48,18 @@ class Settings(BaseSettings):
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:3000"
+
+    # The SPA's own base URL (Phase 24) - used only to build the
+    # human-clickable email-verification / password-reset links that get
+    # logged (and, in this environment, returned directly in the API
+    # response - see AuthService.register) since real SMTP delivery for
+    # these isn't wired up yet.
+    FRONTEND_BASE_URL: str = "http://localhost:3000"
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = 24
+    # Deliberately much shorter than email verification - a leaked/forwarded
+    # password-reset link is more immediately dangerous than a leaked
+    # email-verification one, so it should stop working quickly.
+    PASSWORD_RESET_TOKEN_EXPIRE_HOURS: int = 1
 
     # Rate limiting - previously only login/register were throttled at all;
     # broadened per the technical audit's finding that every other endpoint,

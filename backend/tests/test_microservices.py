@@ -91,7 +91,9 @@ def test_microservice_write_endpoints_forbidden_for_viewer(client, make_user_wit
     assert delete_response.status_code == 403
 
 
-def test_delete_microservice_requires_admin(client, make_user_with_role):
+def test_delete_microservice_requires_admin(client, make_user_with_role, db_session):
+    from app.models.user import Role, User
+
     operator_token = make_user_with_role("operator_user", "operator")
     project = _create_project(client, operator_token)
     microservice = client.post(
@@ -100,8 +102,33 @@ def test_delete_microservice_requires_admin(client, make_user_with_role):
         headers=_auth_header(operator_token),
     ).json()
 
-    admin_token = make_user_with_role("admin_user", "admin")
+    # Deleting requires the admin role AND being the project's own owner
+    # (Phase 24: admin is an app-management role within a tenant, not a
+    # cross-tenant bypass) - grant the SAME owner the admin role rather
+    # than using a second, unrelated user.
+    admin_role = db_session.query(Role).filter(Role.name == "admin").one()
+    owner = db_session.query(User).filter(User.username == "operator_user").one()
+    owner.roles.append(admin_role)
+    db_session.commit()
+
     response = client.delete(
-        f"/api/v1/microservices/{microservice['id']}", headers=_auth_header(admin_token)
+        f"/api/v1/microservices/{microservice['id']}", headers=_auth_header(operator_token)
     )
     assert response.status_code == 204
+
+
+def test_delete_microservice_forbidden_for_a_non_owner_admin(client, make_user_with_role):
+    owner_token = make_user_with_role("microservice_owner", "operator")
+    project = _create_project(client, owner_token)
+    microservice = client.post(
+        f"/api/v1/projects/{project['id']}/microservices",
+        json={"name": "billing-service"},
+        headers=_auth_header(owner_token),
+    ).json()
+
+    other_admin_token = make_user_with_role("other_microservice_admin", "admin")
+    response = client.delete(
+        f"/api/v1/microservices/{microservice['id']}", headers=_auth_header(other_admin_token)
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "NOT_YOUR_PROJECT"

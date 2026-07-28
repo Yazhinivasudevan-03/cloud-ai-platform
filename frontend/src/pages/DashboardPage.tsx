@@ -20,12 +20,25 @@ import { optimizationApi } from "@/services/optimizationApi";
 import { notificationsApi } from "@/services/notificationsApi";
 import { cloudProviderAccountsApi } from "@/services/cloudProviderAccountsApi";
 import { formatRelativeTime } from "@/utils/formatters";
-import { providerLabel } from "@/utils/cloudProviders";
+import { KNOWN_PROVIDERS, providerLabel } from "@/utils/cloudProviders";
 import { useAuth } from "@/contexts/AuthContext";
+
+// The onboarding empty-state's named connect buttons - every provider a
+// user can actually pick, in the order the platform first asked for them
+// (AWS, Azure, Google Cloud, Oracle Cloud, IBM Cloud, DigitalOcean,
+// Alibaba Cloud) - excludes the catch-all "other" entry, which stays
+// reachable via the generic "Connect a cloud account" button instead.
+const ONBOARDING_PROVIDERS = KNOWN_PROVIDERS.filter((p) => p.value !== "other");
 
 export function DashboardPage() {
   const { user } = useAuth();
   const [addAccountOpen, setAddAccountOpen] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<string | undefined>(undefined);
+
+  const openConnectDialog = (provider?: string) => {
+    setSelectedProvider(provider);
+    setAddAccountOpen(true);
+  };
 
   const projectsQuery = useQuery({
     queryKey: ["projects", "count"],
@@ -104,26 +117,44 @@ export function DashboardPage() {
           </Stack>
           <Stack direction="row" spacing={1}>
             {(cloudAccountsQuery.data?.items.length ?? 0) > 0 && (
-              <Button component={RouterLink} to="/cloud-accounts" size="small">
-                Manage all
-              </Button>
+              <>
+                <Button component={RouterLink} to="/cloud-accounts" size="small">
+                  Manage all
+                </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={() => openConnectDialog()}
+                >
+                  Connect a cloud account
+                </Button>
+              </>
             )}
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => setAddAccountOpen(true)}
-            >
-              Connect a cloud account
-            </Button>
           </Stack>
         </Stack>
 
         {cloudAccountsQuery.data?.items.length === 0 && (
-          <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-            Connect an AWS, Azure, GCP, or any other cloud provider account to start monitoring its
-            deployments' live CPU, memory, and network usage right here.
-          </Typography>
+          <Stack spacing={2} sx={{ py: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              No cloud accounts connected. Connect your first cloud account to begin real-time
+              monitoring.
+            </Typography>
+            <Grid container spacing={1.5}>
+              {ONBOARDING_PROVIDERS.map((p) => (
+                <Grid key={p.value} size={{ xs: 6, sm: 4, md: 3 }}>
+                  <Button
+                    fullWidth
+                    variant="outlined"
+                    startIcon={<AddIcon />}
+                    onClick={() => openConnectDialog(p.value)}
+                  >
+                    {p.label}
+                  </Button>
+                </Grid>
+              ))}
+            </Grid>
+          </Stack>
         )}
 
         {cloudAccountsQuery.data && cloudAccountsQuery.data.items.length > 0 && (
@@ -213,8 +244,10 @@ export function DashboardPage() {
       )}
 
       <CloudAccountFormDialog
+        key={selectedProvider ?? "none"}
         open={addAccountOpen}
         account={null}
+        initialProvider={selectedProvider}
         onClose={() => setAddAccountOpen(false)}
       />
     </>

@@ -12,6 +12,7 @@ from app.schemas.project import (
     ProjectUpdate,
 )
 from app.utils.exceptions import ConflictError, NotFoundError, ValidationAppError
+from app.utils.ownership import raise_if_cannot_access_project
 
 _COST_TIERS = ("cost_warning_threshold", "cost_critical_threshold", "cost_saturated_threshold")
 
@@ -30,20 +31,31 @@ class ProjectService:
         project = Project(name=payload.name, description=payload.description, owner_id=owner.id)
         return self.repository.create(project)
 
-    def get(self, project_id: int) -> Project:
+    def get(self, project_id: int, current_user: User) -> Project:
         project = self.repository.get_by_id(project_id)
         if project is None:
             raise NotFoundError(f"Project {project_id} not found", code="PROJECT_NOT_FOUND")
+        raise_if_cannot_access_project(project, current_user)
         return project
 
     def list(
-        self, name_contains: str | None, sort_by: str, order: str, page: int, page_size: int
+        self,
+        name_contains: str | None,
+        sort_by: str,
+        order: str,
+        page: int,
+        page_size: int,
+        current_user: User,
     ) -> tuple[list[Project], int]:
         offset = (page - 1) * page_size
-        return self.repository.search(name_contains, sort_by, order, offset, page_size)
+        # Phase 24: a regular user only ever sees their own projects; only
+        # a platform is_superuser sees every tenant's (owner_id=None -> no
+        # filter - see ProjectRepository.search).
+        owner_id = None if current_user.is_superuser else current_user.id
+        return self.repository.search(name_contains, sort_by, order, offset, page_size, owner_id)
 
-    def update(self, project_id: int, payload: ProjectUpdate) -> Project:
-        project = self.get(project_id)
+    def update(self, project_id: int, payload: ProjectUpdate, current_user: User) -> Project:
+        project = self.get(project_id, current_user)
         if payload.name is not None and payload.name != project.name:
             if self.repository.get_by_name(payload.name) is not None:
                 raise ConflictError(
@@ -56,18 +68,18 @@ class ProjectService:
         self.db.refresh(project)
         return project
 
-    def delete(self, project_id: int) -> None:
-        project = self.get(project_id)
+    def delete(self, project_id: int, current_user: User) -> None:
+        project = self.get(project_id, current_user)
         self.repository.delete(project)
 
-    def get_cost_thresholds(self, project_id: int) -> ProjectCostThresholdRead:
-        project = self.get(project_id)
+    def get_cost_thresholds(self, project_id: int, current_user: User) -> ProjectCostThresholdRead:
+        project = self.get(project_id, current_user)
         return self._to_cost_threshold_read(project)
 
     def update_cost_thresholds(
-        self, project_id: int, payload: ProjectCostThresholdUpdate
+        self, project_id: int, payload: ProjectCostThresholdUpdate, current_user: User
     ) -> ProjectCostThresholdRead:
-        project = self.get(project_id)
+        project = self.get(project_id, current_user)
         data = payload.model_dump(exclude_unset=True)
 
         for field in ("monthly_budget", *_COST_TIERS):

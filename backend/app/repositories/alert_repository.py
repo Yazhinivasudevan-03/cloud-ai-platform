@@ -1,8 +1,11 @@
 """Data-access layer for the Alert entity."""
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from app.models.alert import Alert
+from app.models.deployment import Deployment
+from app.models.microservice import Microservice
+from app.models.project import Project
 from app.repositories.base_repository import BaseRepository
 
 
@@ -91,9 +94,21 @@ class AlertRepository(BaseRepository[Alert]):
         severity: str | None,
         offset: int,
         limit: int,
+        owner_id: int | None = None,
     ) -> tuple[list[Alert], int]:
         """deployment_id=None searches across all deployments (the global
-        `GET /alerts` listing); a specific ID scopes to one deployment."""
+        `GET /alerts` listing); a specific ID scopes to one deployment.
+
+        owner_id (Phase 24) restricts the global listing to one user's own
+        alerts - None means no owner filter (only a platform is_superuser
+        calls it that way; every other caller passes their own
+        current_user.id - see AlertService.list_global). An alert matches
+        an owner via whichever of its three mutually-exclusive scopes it
+        actually has: deployment_id (via the deployment's project owner),
+        project_id (via that project's own owner), or user_id (directly) -
+        genuinely platform-wide alerts (all three null) never match any
+        owner_id and are excluded entirely for non-superusers.
+        """
         stmt = select(Alert)
         count_stmt = select(func.count()).select_from(Alert)
 
@@ -109,6 +124,28 @@ class AlertRepository(BaseRepository[Alert]):
             condition = Alert.severity == severity
             stmt = stmt.where(condition)
             count_stmt = count_stmt.where(condition)
+        if owner_id is not None:
+            deployment_project = aliased(Project)
+            cost_project = aliased(Project)
+            owner_condition = or_(
+                deployment_project.owner_id == owner_id,
+                cost_project.owner_id == owner_id,
+                Alert.user_id == owner_id,
+            )
+            stmt = (
+                stmt.outerjoin(Deployment, Deployment.id == Alert.deployment_id)
+                .outerjoin(Microservice, Microservice.id == Deployment.microservice_id)
+                .outerjoin(deployment_project, deployment_project.id == Microservice.project_id)
+                .outerjoin(cost_project, cost_project.id == Alert.project_id)
+                .where(owner_condition)
+            )
+            count_stmt = (
+                count_stmt.outerjoin(Deployment, Deployment.id == Alert.deployment_id)
+                .outerjoin(Microservice, Microservice.id == Deployment.microservice_id)
+                .outerjoin(deployment_project, deployment_project.id == Microservice.project_id)
+                .outerjoin(cost_project, cost_project.id == Alert.project_id)
+                .where(owner_condition)
+            )
 
         stmt = stmt.order_by(Alert.triggered_at.desc()).offset(offset).limit(limit)
 

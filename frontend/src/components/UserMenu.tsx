@@ -34,13 +34,13 @@ export function UserMenu() {
         <MenuItem
           onClick={() => {
             setAnchorEl(null);
-            navigate("/settings");
+            navigate("/profile");
           }}
         >
           <ListItemIcon>
             <SettingsIcon fontSize="small" />
           </ListItemIcon>
-          Settings
+          Profile
         </MenuItem>
         <MenuItem
           onClick={() => {

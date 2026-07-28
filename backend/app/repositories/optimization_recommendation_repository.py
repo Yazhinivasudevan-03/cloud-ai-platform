@@ -4,7 +4,10 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.models.deployment import Deployment
+from app.models.microservice import Microservice
 from app.models.optimization_recommendation import OptimizationRecommendation
+from app.models.project import Project
 from app.repositories.base_repository import BaseRepository
 
 
@@ -57,10 +60,14 @@ class OptimizationRecommendationRepository(BaseRepository[OptimizationRecommenda
         recommendation_type: str | None,
         offset: int,
         limit: int,
+        owner_id: int | None = None,
     ) -> tuple[list[OptimizationRecommendation], int]:
         """deployment_id=None searches across all deployments (the global
         `GET /optimization-recommendations` listing); a specific ID scopes to
-        one deployment."""
+        one deployment. owner_id (Phase 24) further restricts the global
+        listing to one user's own deployments - None means no owner filter
+        (only a platform is_superuser calls it that way; every other caller
+        passes their own current_user.id - see OptimizationService.list_global)."""
         stmt = select(OptimizationRecommendation)
         count_stmt = select(func.count()).select_from(OptimizationRecommendation)
 
@@ -76,6 +83,19 @@ class OptimizationRecommendationRepository(BaseRepository[OptimizationRecommenda
             condition = OptimizationRecommendation.recommendation_type == recommendation_type
             stmt = stmt.where(condition)
             count_stmt = count_stmt.where(condition)
+        if owner_id is not None:
+            stmt = (
+                stmt.join(Deployment, Deployment.id == OptimizationRecommendation.deployment_id)
+                .join(Microservice, Microservice.id == Deployment.microservice_id)
+                .join(Project, Project.id == Microservice.project_id)
+                .where(Project.owner_id == owner_id)
+            )
+            count_stmt = (
+                count_stmt.join(Deployment, Deployment.id == OptimizationRecommendation.deployment_id)
+                .join(Microservice, Microservice.id == Deployment.microservice_id)
+                .join(Project, Project.id == Microservice.project_id)
+                .where(Project.owner_id == owner_id)
+            )
 
         stmt = stmt.order_by(OptimizationRecommendation.created_at.desc()).offset(offset).limit(limit)
 

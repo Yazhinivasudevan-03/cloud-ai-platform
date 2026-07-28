@@ -28,9 +28,12 @@ router = APIRouter(tags=["Cloud Costs"])
     responses={404: {"model": ErrorResponse, "description": "Project not found"}},
 )
 def ingest_cloud_cost(
-    project_id: int, payload: CloudCostCreate, db: Session = Depends(get_db)
+    project_id: int,
+    payload: CloudCostCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> CloudCostRead:
-    return CloudCostController(db).ingest(project_id, payload)
+    return CloudCostController(db).ingest(project_id, payload, current_user)
 
 
 @router.get(
@@ -47,9 +50,9 @@ def list_cloud_costs(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[CloudCostRead]:
-    return CloudCostController(db).list(project_id, provider, since, until, page, page_size)
+    return CloudCostController(db).list(project_id, provider, since, until, page, page_size, current_user)
 
 
 @router.post(
@@ -73,7 +76,7 @@ def sync_project_cloud_costs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> list[CloudCostRead]:
-    return CloudCostController(db).sync_from_aws(project_id, cloud_provider_account_id, current_user.id)
+    return CloudCostController(db).sync_cloud_costs(project_id, cloud_provider_account_id, current_user)
 
 
 @router.get(
@@ -85,6 +88,6 @@ def sync_project_cloud_costs(
 def forecast_cost(
     project_id: int,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> CostForecastRead:
-    return CloudCostController(db).forecast(project_id)
+    return CloudCostController(db).forecast(project_id, current_user)

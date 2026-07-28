@@ -49,10 +49,10 @@ def list_recommendations_global(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[OptimizationRecommendationRead]:
     return OptimizationController(db).list_global(
-        deployment_id, status, recommendation_type, page, page_size
+        deployment_id, status, recommendation_type, page, page_size, current_user
     )
 
 
@@ -69,10 +69,10 @@ def list_recommendations(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[OptimizationRecommendationRead]:
     return OptimizationController(db).list_for_deployment(
-        deployment_id, status, recommendation_type, page, page_size
+        deployment_id, status, recommendation_type, page, page_size, current_user
     )
 
 
@@ -85,9 +85,9 @@ def list_recommendations(
 def get_recommendation(
     recommendation_id: int,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> OptimizationRecommendationRead:
-    return OptimizationController(db).get(recommendation_id)
+    return OptimizationController(db).get(recommendation_id, current_user)
 
 
 @router.patch(
@@ -101,6 +101,9 @@ def get_recommendation(
     },
 )
 def update_recommendation(
-    recommendation_id: int, payload: OptimizationRecommendationUpdate, db: Session = Depends(get_db)
+    recommendation_id: int,
+    payload: OptimizationRecommendationUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> OptimizationRecommendationRead:
-    return OptimizationController(db).update_status(recommendation_id, payload.status)
+    return OptimizationController(db).update_status(recommendation_id, payload.status, current_user)

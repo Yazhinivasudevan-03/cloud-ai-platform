@@ -35,6 +35,14 @@ os.environ["OPTIMIZATION_AUTO_APPLY_ENABLED"] = "false"
 # not a hypothetical one. Prometheus-specific behavior itself is unit-
 # tested directly, with httpx mocked, in test_prometheus_client.py.
 os.environ["PROMETHEUS_URL"] = "http://127.0.0.1:1"
+# Same class of leak as PROMETHEUS_URL above: a developer's own local .env
+# may have real SMTP credentials configured (e.g. for a live demo against
+# the real dev stack) so the notification "test" endpoint's not_configured
+# assertions stay deterministic regardless of host state, this suite's own
+# SMTP_HOST is forced empty - email_notifier.py treats that exactly the
+# same as "never configured" (see its own not-configured check), which is
+# the real, existing behavior being tested, not a bypass of it.
+os.environ["SMTP_HOST"] = ""
 
 import pytest
 from fastapi import Request
@@ -129,7 +137,7 @@ def make_user_with_role(client: TestClient, db_session: Session):
     """
 
     def _make(username: str, role_name: str | None = None) -> str:
-        client.post(
+        register_response = client.post(
             "/api/v1/auth/register",
             json={
                 "username": username,
@@ -137,6 +145,13 @@ def make_user_with_role(client: TestClient, db_session: Session):
                 "password": DEFAULT_TEST_PASSWORD,
             },
         )
+        # Phase 24: login is gated on email_verified, so every test user
+        # this fixture creates has to genuinely complete that flow - this
+        # is real coverage of the verify-email endpoint on nearly every
+        # test run, not a bypass of it (the flow itself has its own
+        # dedicated tests in test_auth.py).
+        verification_token = register_response.json()["verification_token"]
+        client.get("/api/v1/auth/verify-email", params={"token": verification_token})
         if role_name:
             role = db_session.query(Role).filter(Role.name == role_name).one()
             user = db_session.query(User).filter(User.username == username).one()
