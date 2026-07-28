@@ -18,11 +18,21 @@ export interface PaginatedResponse<T> {
   meta: PaginationMeta;
 }
 
+// A single Pydantic/FastAPI validation error entry (see the backend's
+// RequestValidationError handler, app/middleware/error_handler.py) - the
+// `error.details` array on a 422 response is a list of these.
+export interface ApiValidationErrorDetail {
+  type: string;
+  loc: (string | number)[];
+  msg: string;
+  input?: unknown;
+}
+
 export interface ApiErrorBody {
   error: {
     code: string;
     message: string;
-    details?: unknown;
+    details?: ApiValidationErrorDetail[];
   };
 }
 

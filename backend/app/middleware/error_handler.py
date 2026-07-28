@@ -5,6 +5,35 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.utils.exceptions import AppException
+from app.utils.logger import get_logger
+
+logger = get_logger("http.validation")
+
+
+def _humanize_validation_errors(errors: list[dict]) -> str:
+    """Turns Pydantic's structured error list into a real, specific
+    message - e.g. "mobile_number must be in E.164 format, e.g.
+    +14155552671" or "Missing required field: country" - instead of the
+    generic, unhelpful "Request validation failed" this replaces. Multiple
+    simultaneous errors are joined so nothing is silently dropped."""
+    messages: list[str] = []
+    for error in errors:
+        loc = [part for part in error.get("loc", []) if part != "body"]
+        field = ".".join(str(part) for part in loc) if loc else None
+
+        if error.get("type") == "missing" and field:
+            messages.append(f"Missing required field: {field}")
+            continue
+
+        # Pydantic v2 prefixes every field_validator/model_validator-raised
+        # ValueError with "Value error, " - strip that boilerplate so only
+        # the real, specific message (written by this project's own
+        # validators, e.g. "password and confirm_password must match") is
+        # shown, whether or not the error is tied to a single field.
+        raw_msg = error.get("msg", "")
+        messages.append(raw_msg.removeprefix("Value error, "))
+
+    return "; ".join(messages) if messages else "Request validation failed"
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -22,13 +51,29 @@ def register_exception_handlers(app: FastAPI) -> None:
         # exc.errors() may embed raw exception objects (e.g. a ValueError raised
         # inside a field_validator) in its "ctx" field, which json.dumps cannot
         # serialize directly - jsonable_encoder converts them to strings first.
+        errors = jsonable_encoder(exc.errors())
+        message = _humanize_validation_errors(errors)
+
+        # Prints the exact validation failure to the terminal (JSON-formatted,
+        # see app/utils/logger.py) - `extra` surfaces the full per-field error
+        # list as its own log field, not just the summarized message string,
+        # so the real cause is always visible server-side even if a client
+        # only shows a generic banner.
+        logger.warning(
+            "Request validation failed for %s %s: %s",
+            request.method,
+            request.url.path,
+            message,
+            extra={"validation_errors": errors},
+        )
+
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={
                 "error": {
                     "code": "VALIDATION_ERROR",
-                    "message": "Request validation failed",
-                    "details": jsonable_encoder(exc.errors()),
+                    "message": message,
+                    "details": errors,
                 }
             },
         )
