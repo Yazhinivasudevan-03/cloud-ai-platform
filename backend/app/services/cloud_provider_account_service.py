@@ -12,8 +12,11 @@ from app.repositories.cloud_provider_account_repository import CloudProviderAcco
 from app.repositories.deployment_repository import DeploymentRepository
 from app.repositories.resource_usage_repository import ResourceUsageRepository
 from app.schemas.cloud_provider_account import CloudProviderAccountCreate, CloudProviderAccountUpdate
+from app.services.cloud_region_sync_service import load_available_regions
 from app.utils.crypto import encrypt_credentials
-from app.utils.exceptions import ConflictError, ForbiddenError, NotFoundError
+from app.utils.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
+
+ALL_REGIONS_SENTINEL = "all"
 
 
 class CloudProviderAccountService:
@@ -83,6 +86,29 @@ class CloudProviderAccountService:
     def delete(self, account_id: int, current_user_id: int) -> None:
         account = self._get_owned_or_raise(account_id, current_user_id)
         self.repository.delete(account)
+
+    def update_selected_region(
+        self, account_id: int, current_user_id: int, selected_region: str
+    ) -> CloudProviderAccount:
+        """Switches which region (or "all", the aggregate sentinel - see
+        CloudProviderAccount.region's docstring) this account's requests
+        use, without reconnecting/re-entering credentials (Phase 25).
+        Validated against the account's own discovered available_regions
+        when one exists; an account that has never been synced yet (empty
+        available_regions) accepts any non-empty value, the same free-text
+        behavior this field has always had."""
+        account = self._get_owned_or_raise(account_id, current_user_id)
+        available_ids = [entry["id"] for entry in load_available_regions(account)]
+        if selected_region != ALL_REGIONS_SENTINEL and available_ids and selected_region not in available_ids:
+            raise ValidationAppError(
+                f"'{selected_region}' is not one of this account's discovered regions - "
+                f"use one of {', '.join(available_ids)}, or '{ALL_REGIONS_SENTINEL}'",
+                code="REGION_NOT_AVAILABLE",
+            )
+        account.region = selected_region
+        self.db.commit()
+        self.db.refresh(account)
+        return account
 
     def list_linked_deployments(
         self, account_id: int, current_user_id: int

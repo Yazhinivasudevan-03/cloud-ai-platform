@@ -422,6 +422,22 @@ export interface CloudProviderAccountUpdate {
   is_active?: boolean;
 }
 
+// --- Dynamic multi-cloud region discovery (Phase 25) --------------------
+
+export const ALL_REGIONS_SENTINEL = "all";
+
+export interface CloudRegion {
+  id: string;
+  display_name: string;
+}
+
+export interface CloudAccountRegions {
+  selected_region: string;
+  regions: CloudRegion[];
+  last_region_sync: string | null;
+  connection_status: string;
+}
+
 // --- Notification settings (Phase 20) ----------------------------------
 
 // The 5 tiered categories support per-tier (60/80/90%) checkboxes; the

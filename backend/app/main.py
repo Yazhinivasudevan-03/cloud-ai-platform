@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.alerts.scheduler import register_alert_evaluation_job
 from app.config.settings import get_settings
 from app.database.session import engine as db_engine
-from app.integrations.scheduler import register_cloud_sync_job
+from app.integrations.scheduler import register_cloud_region_sync_job, register_cloud_sync_job
 from app.middleware.audit_middleware import AuditLogMiddleware
 from app.middleware.error_handler import register_exception_handlers
 from app.middleware.logging_middleware import RequestLoggingMiddleware
@@ -50,6 +50,7 @@ async def lifespan(app: FastAPI):
     register_alert_evaluation_job(scheduler)
     register_optimization_evaluation_job(scheduler)
     register_cloud_sync_job(scheduler)
+    register_cloud_region_sync_job(scheduler)
     scheduler.start()
     yield
     shutdown_scheduler(scheduler)

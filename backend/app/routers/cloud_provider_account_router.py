@@ -31,6 +31,7 @@ from app.schemas.cloud_provider_account import (
     CloudProviderAccountRead,
     CloudProviderAccountUpdate,
 )
+from app.schemas.cloud_region import CloudAccountRegionsRead, SelectRegionRequest
 from app.schemas.common import ErrorResponse, PaginatedResponse
 
 router = APIRouter(prefix="/cloud-provider-accounts", tags=["Cloud Provider Accounts"])
@@ -280,3 +281,65 @@ def delete_cloud_provider_account_timezone(
     current_user: User = Depends(get_current_active_user),
 ) -> None:
     CloudAccountTimezoneController(db).delete(account_id, timezone_id, current_user.id)
+
+
+@router.get(
+    "/{account_id}/regions",
+    response_model=CloudAccountRegionsRead,
+    summary=(
+        "Get one of the current user's own cloud provider accounts' discovered regions "
+        "(Phase 25) - regions are always discovered live via the provider's own API, "
+        "never hardcoded; an account synced for the first time triggers one live call"
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+        422: {"model": ErrorResponse, "description": "Region discovery failed (bad credentials, provider outage, etc.)"},
+    },
+)
+def get_cloud_provider_account_regions(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CloudAccountRegionsRead:
+    return CloudProviderAccountController(db).get_regions(account_id, current_user.id)
+
+
+@router.post(
+    "/{account_id}/refresh-regions",
+    response_model=CloudAccountRegionsRead,
+    summary="Force a live re-discovery of one of the current user's own cloud provider accounts' regions",
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+        422: {"model": ErrorResponse, "description": "Region discovery failed (bad credentials, provider outage, etc.)"},
+    },
+)
+def refresh_cloud_provider_account_regions(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CloudAccountRegionsRead:
+    return CloudProviderAccountController(db).refresh_regions(account_id, current_user.id)
+
+
+@router.patch(
+    "/{account_id}/region",
+    response_model=CloudProviderAccountRead,
+    summary=(
+        "Switch one of the current user's own cloud provider accounts' currently selected "
+        "region (or 'all' to aggregate) without reconnecting the account"
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+        422: {"model": ErrorResponse, "description": "Not one of this account's discovered regions"},
+    },
+)
+def update_cloud_provider_account_region(
+    account_id: int,
+    payload: SelectRegionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CloudProviderAccountRead:
+    return CloudProviderAccountController(db).update_region(account_id, current_user.id, payload.selected_region)

@@ -19,7 +19,9 @@ boto3==1.43.51
 azure-identity==1.19.0
 azure-monitor-query==1.4.1
 azure-mgmt-costmanagement==4.0.1
+azure-mgmt-resource==23.2.0
 google-cloud-monitoring==2.23.1
+google-cloud-compute==1.24.0
 google-auth==2.37.0
 kubernetes==31.0.0
 tenacity==9.0.0

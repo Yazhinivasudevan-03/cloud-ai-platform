@@ -229,6 +229,15 @@ class Settings(BaseSettings):
     # past calendar months of spend to pull per sync.
     CLOUD_COST_SYNC_LOOKBACK_MONTHS: int = 3
 
+    # Dynamic multi-cloud region discovery (Phase 25) - how often the
+    # background job re-discovers each connected account's available
+    # regions via the provider's own API, and how long a previously
+    # discovered region list may be served from the database before a
+    # read is considered stale enough to require a fresh call (the
+    # "Refresh Regions" button always bypasses this and forces a live call).
+    CLOUD_REGION_SYNC_INTERVAL_HOURS: int = 24
+    CLOUD_REGION_CACHE_TTL_HOURS: int = 24
+
     # Structured logging + distributed tracing (Phase 19). Logs are always
     # emitted as one JSON object per line (see app/utils/logger.py) - there
     # is no plain-text fallback, since the point is machine-parseable

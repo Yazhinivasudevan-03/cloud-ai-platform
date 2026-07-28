@@ -4,6 +4,7 @@ import type {
   CloudAccountAlertThreshold,
   CloudAccountAlertThresholdUpdate,
   CloudAccountDeploymentSummary,
+  CloudAccountRegions,
   CloudAccountTimezone,
   CloudAccountTimezoneCreate,
   CloudAccountTimezoneUpdate,
@@ -80,4 +81,19 @@ export const cloudProviderAccountsApi = {
 
   deleteTimezone: (accountId: number, timezoneId: number) =>
     httpClient.delete(`/cloud-provider-accounts/${accountId}/timezones/${timezoneId}`).then(() => undefined),
+
+  getRegions: (accountId: number) =>
+    httpClient.get<CloudAccountRegions>(`/cloud-provider-accounts/${accountId}/regions`).then((r) => r.data),
+
+  refreshRegions: (accountId: number) =>
+    httpClient
+      .post<CloudAccountRegions>(`/cloud-provider-accounts/${accountId}/refresh-regions`)
+      .then((r) => r.data),
+
+  selectRegion: (accountId: number, selectedRegion: string) =>
+    httpClient
+      .patch<CloudProviderAccount>(`/cloud-provider-accounts/${accountId}/region`, {
+        selected_region: selectedRegion,
+      })
+      .then((r) => r.data),
 };

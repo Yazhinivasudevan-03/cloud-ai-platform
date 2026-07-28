@@ -5,6 +5,7 @@ import { Box, Chip, Link, Paper, Stack, Typography } from "@mui/material";
 import { PageHeader } from "@/components/PageHeader";
 import { AlertTimeCell } from "@/components/AlertTimeCell";
 import { CloudAccountAlertThresholdsCard } from "@/components/CloudAccountAlertThresholdsCard";
+import { CloudAccountRegionsCard } from "@/components/CloudAccountRegionsCard";
 import { CloudAccountTimezonesCard } from "@/components/CloudAccountTimezonesCard";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { ErrorAlert } from "@/components/ErrorAlert";
@@ -119,6 +120,10 @@ export function CloudAccountDetailPage() {
           </Stack>
         )}
       </Paper>
+
+      <Box sx={{ mb: 3 }}>
+        <CloudAccountRegionsCard accountId={id} />
+      </Box>
 
       <Box sx={{ mb: 3 }}>
         <CloudAccountTimezonesCard accountId={id} provider={accountQuery.data?.provider ?? ""} />
