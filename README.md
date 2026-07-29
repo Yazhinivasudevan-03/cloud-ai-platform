@@ -6,7 +6,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 
 ## Project status
 
-**All 10 phases complete.** Built phase by phase - see [`docs/`](docs/) for a detailed, honestly-verified report for each phase.
+**All 25 phases complete.** Built phase by phase - see [`docs/`](docs/) for a detailed, honestly-verified report for each phase.
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -34,6 +34,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 | 22 | Multi-timezone support for cloud accounts (a new `CloudAccountTimezone` table, IANA-only via stdlib `zoneinfo`, zero new dependencies) - deployments optionally link to a configured region/timezone so monitoring/alerts/notifications surface local time alongside UTC; extend-only (no existing table/API/feature changed shape), live-verified against AWS London, AWS Mumbai, Azure UK South, and GCP Mumbai | **Complete** - see [`docs/PHASE_22.md`](docs/PHASE_22.md) |
 | 23 | Back buttons on every page (one shared component); a real Notification Bell (severity counts, mark-read/clear/view-details) + per-user notification settings (secondary email, country code, Telegram username, language, a full 15-category/tier preference table); real (non-fabricated) alert evaluators added for all 9 previously-missing categories - Cloud Usage, Storage, Pod Restart, Resource Optimization, Security (real failed logins), API Latency/Error Rate (real Prometheus queries), and Node/Container Failure (this platform's first live Kubernetes API connection) - live verification caught and fixed 2 real bugs (a Security evaluator that could never fire, and a Container Failure check that missed init containers - confirmed against this platform's own genuinely-still-crashing backend pod) | **Complete** - see [`docs/PHASE_23.md`](docs/PHASE_23.md) |
 | 24 | Converted the platform into a genuine multi-tenant SaaS product: real signup/email-verification/forgot-reset-password/remember-me auth flows; full per-user data isolation across the entire core domain (Project through Alert, including the notification dispatcher's fan-out - previously a deliberately shared, single-organization model); real Azure Monitor + Google Cloud Monitoring metrics sync and Azure Cost Management billing sync alongside the existing AWS integration; a matching SaaS frontend (public Landing Page, rebuilt Sign Up/Login, named-provider onboarding, extended Profile page, full navigation) | **Complete** - see [`docs/PHASE_24.md`](docs/PHASE_24.md) |
+| 25 | Dynamic multi-cloud region discovery (live, provider-discovered region lists for AWS/Azure/GCP/Oracle Cloud/Alibaba Cloud, replacing any hardcoded region data), a full read-only resource inventory (compute/clusters/databases/storage/networking, 25 real read paths), and real deploy/destroy provisioning (compute/storage/networking, confirm-to-destroy + full audit trail, fixed free-tier-eligible instance sizes) - all behind one provider-agnostic adapter interface, built and committed across 6 independently-verified sub-phases (25A-25F) | **Complete** - see [`docs/PHASE_25.md`](docs/PHASE_25.md) |
 
 ## Known limitations (honestly disclosed, not glossed over)
 
