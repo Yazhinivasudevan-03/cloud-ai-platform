@@ -11,7 +11,9 @@ import type {
   CloudProviderAccount,
   CloudProviderAccountCreate,
   CloudProviderAccountUpdate,
+  CloudResourceList,
   PaginatedResponse,
+  ResourceCategory,
 } from "@/types";
 
 export interface ListCloudProviderAccountsParams {
@@ -94,6 +96,13 @@ export const cloudProviderAccountsApi = {
     httpClient
       .patch<CloudProviderAccount>(`/cloud-provider-accounts/${accountId}/region`, {
         selected_region: selectedRegion,
+      })
+      .then((r) => r.data),
+
+  listResources: (accountId: number, category: ResourceCategory, region: string) =>
+    httpClient
+      .get<CloudResourceList>(`/cloud-provider-accounts/${accountId}/resources`, {
+        params: { category, region },
       })
       .then((r) => r.data),
 };

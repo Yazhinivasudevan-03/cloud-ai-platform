@@ -9,7 +9,12 @@ region, so no presentation-only lookup table is needed here.
 """
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError, ServiceRequestError
 from azure.identity import ClientSecretCredential
+from azure.mgmt.compute import ComputeManagementClient
+from azure.mgmt.containerservice import ContainerServiceClient
+from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.resource import SubscriptionClient
+from azure.mgmt.sql import SqlManagementClient
+from azure.mgmt.storage import StorageManagementClient
 import tenacity
 
 from app.integrations.azure_cost_management import fetch_monthly_costs_by_service
@@ -17,6 +22,7 @@ from app.integrations.azure_monitor import fetch_vm_resource_usage
 from app.integrations.cloud_provider_client import (
     CloudProviderClient,
     CloudRegionInfo,
+    CloudResourceSummary,
     MonthlyServiceCost,
     ResourceUsageSnapshot,
 )
@@ -109,3 +115,118 @@ class AzureCloudProviderClient(CloudProviderClient):
 
     def list_costs(self, months: int) -> list[MonthlyServiceCost]:
         return fetch_monthly_costs_by_service(self.credentials, months)
+
+    def _subscription_id(self) -> str:
+        self.authenticate()
+        return self.credentials["subscription_id"]
+
+    def _wrap_azure_error(self, exc: Exception, code: str) -> ValidationAppError:
+        if isinstance(exc, ClientAuthenticationError):
+            return ValidationAppError(f"Azure rejected the credentials: {exc}", code=code)
+        if isinstance(exc, HttpResponseError):
+            return ValidationAppError(f"Azure rejected the request: {exc.message or exc}", code=code)
+        return ValidationAppError(f"Could not reach Azure: {exc}", code=code)
+
+    @staticmethod
+    def _matches_region(item_location: str | None, region: str) -> bool:
+        return (item_location or "").replace(" ", "").lower() == region.replace(" ", "").lower()
+
+    def list_resources(self, region: str) -> list[CloudResourceSummary]:
+        client = ComputeManagementClient(self._credential(), self._subscription_id())
+        try:
+            vms = list(client.virtual_machines.list_all())
+        except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
+            raise self._wrap_azure_error(exc, "AZURE_RESOURCE_INVENTORY_FAILED") from exc
+
+        return [
+            {
+                "id": vm.id,
+                "name": vm.name,
+                "type": vm.hardware_profile.vm_size if vm.hardware_profile else "unknown",
+                "region": region,
+                "status": vm.provisioning_state or "unknown",
+                "created_at": None,
+            }
+            for vm in vms
+            if self._matches_region(vm.location, region)
+        ]
+
+    def list_clusters(self, region: str) -> list[CloudResourceSummary]:
+        client = ContainerServiceClient(self._credential(), self._subscription_id())
+        try:
+            clusters = list(client.managed_clusters.list())
+        except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
+            raise self._wrap_azure_error(exc, "AZURE_CLUSTER_INVENTORY_FAILED") from exc
+
+        return [
+            {
+                "id": cluster.id,
+                "name": cluster.name,
+                "type": "aks",
+                "region": region,
+                "status": cluster.provisioning_state or "unknown",
+                "created_at": None,
+            }
+            for cluster in clusters
+            if self._matches_region(cluster.location, region)
+        ]
+
+    def list_databases(self, region: str) -> list[CloudResourceSummary]:
+        client = SqlManagementClient(self._credential(), self._subscription_id())
+        try:
+            servers = list(client.servers.list())
+        except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
+            raise self._wrap_azure_error(exc, "AZURE_DATABASE_INVENTORY_FAILED") from exc
+
+        return [
+            {
+                "id": server.id,
+                "name": server.name,
+                "type": "azure_sql_server",
+                "region": region,
+                "status": server.state or "unknown",
+                "created_at": None,
+            }
+            for server in servers
+            if self._matches_region(server.location, region)
+        ]
+
+    def list_storage(self, region: str) -> list[CloudResourceSummary]:
+        client = StorageManagementClient(self._credential(), self._subscription_id())
+        try:
+            accounts = list(client.storage_accounts.list())
+        except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
+            raise self._wrap_azure_error(exc, "AZURE_STORAGE_INVENTORY_FAILED") from exc
+
+        return [
+            {
+                "id": account.id,
+                "name": account.name,
+                "type": "storage_account",
+                "region": region,
+                "status": account.status_of_primary or account.provisioning_state or "unknown",
+                "created_at": account.creation_time,
+            }
+            for account in accounts
+            if self._matches_region(account.location, region)
+        ]
+
+    def list_networking(self, region: str) -> list[CloudResourceSummary]:
+        client = NetworkManagementClient(self._credential(), self._subscription_id())
+        try:
+            vnets = list(client.virtual_networks.list_all())
+        except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
+            raise self._wrap_azure_error(exc, "AZURE_NETWORKING_INVENTORY_FAILED") from exc
+
+        return [
+            {
+                "id": vnet.id,
+                "name": vnet.name,
+                "type": "virtual_network",
+                "region": region,
+                "status": vnet.provisioning_state or "unknown",
+                "created_at": None,
+            }
+            for vnet in vnets
+            if self._matches_region(vnet.location, region)
+        ]

@@ -438,6 +438,26 @@ export interface CloudAccountRegions {
   connection_status: string;
 }
 
+// --- Read-only cloud resource inventory (Phase 25C) ---------------------
+
+export const RESOURCE_CATEGORIES = ["compute", "clusters", "databases", "storage", "networking"] as const;
+export type ResourceCategory = (typeof RESOURCE_CATEGORIES)[number];
+
+export interface CloudResource {
+  id: string;
+  name: string;
+  type: string;
+  region: string;
+  status: string;
+  created_at: string | null;
+}
+
+export interface CloudResourceList {
+  category: string;
+  region: string;
+  items: CloudResource[];
+}
+
 // --- Notification settings (Phase 20) ----------------------------------
 
 // The 5 tiered categories support per-tier (60/80/90%) checkboxes; the

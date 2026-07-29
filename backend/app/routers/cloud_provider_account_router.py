@@ -32,6 +32,7 @@ from app.schemas.cloud_provider_account import (
     CloudProviderAccountUpdate,
 )
 from app.schemas.cloud_region import CloudAccountRegionsRead, SelectRegionRequest
+from app.schemas.cloud_resource import CloudResourceListRead
 from app.schemas.common import ErrorResponse, PaginatedResponse
 
 router = APIRouter(prefix="/cloud-provider-accounts", tags=["Cloud Provider Accounts"])
@@ -343,3 +344,30 @@ def update_cloud_provider_account_region(
     current_user: User = Depends(get_current_active_user),
 ) -> CloudProviderAccountRead:
     return CloudProviderAccountController(db).update_region(account_id, current_user.id, payload.selected_region)
+
+
+@router.get(
+    "/{account_id}/resources",
+    response_model=CloudResourceListRead,
+    summary=(
+        "List real, live resources (compute/clusters/databases/storage/networking) for one of the "
+        "current user's own cloud provider accounts - region='all' aggregates across every "
+        "discovered region"
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+        422: {
+            "model": ErrorResponse,
+            "description": "Invalid category, no regions discovered yet, or the provider rejected the request",
+        },
+    },
+)
+def list_cloud_provider_account_resources(
+    account_id: int,
+    category: str = Query(..., description="compute | clusters | databases | storage | networking"),
+    region: str = Query(..., description="A discovered region id, or 'all' to aggregate every region"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CloudResourceListRead:
+    return CloudProviderAccountController(db).list_inventory(account_id, current_user.id, category, region)

@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { AlertTimeCell } from "@/components/AlertTimeCell";
 import { CloudAccountAlertThresholdsCard } from "@/components/CloudAccountAlertThresholdsCard";
 import { CloudAccountRegionsCard } from "@/components/CloudAccountRegionsCard";
+import { CloudAccountResourcesCard } from "@/components/CloudAccountResourcesCard";
 import { CloudAccountTimezonesCard } from "@/components/CloudAccountTimezonesCard";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { ErrorAlert } from "@/components/ErrorAlert";
@@ -123,6 +124,10 @@ export function CloudAccountDetailPage() {
 
       <Box sx={{ mb: 3 }}>
         <CloudAccountRegionsCard accountId={id} />
+      </Box>
+
+      <Box sx={{ mb: 3 }}>
+        <CloudAccountResourcesCard accountId={id} />
       </Box>
 
       <Box sx={{ mb: 3 }}>

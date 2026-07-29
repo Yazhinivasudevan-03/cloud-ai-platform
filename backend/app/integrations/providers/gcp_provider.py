@@ -18,10 +18,17 @@ from google.api_core.exceptions import (
     ServiceUnavailable,
     Unauthenticated,
 )
-from google.cloud import compute_v1
+from google.cloud import compute_v1, container_v1, storage
 from google.oauth2 import service_account
+from googleapiclient.discovery import build as build_google_api_client
+from googleapiclient.errors import HttpError
 
-from app.integrations.cloud_provider_client import CloudProviderClient, CloudRegionInfo, ResourceUsageSnapshot
+from app.integrations.cloud_provider_client import (
+    CloudProviderClient,
+    CloudRegionInfo,
+    CloudResourceSummary,
+    ResourceUsageSnapshot,
+)
 from app.integrations.gcp_monitoring import fetch_instance_resource_usage
 from app.utils.exceptions import ValidationAppError
 
@@ -121,3 +128,142 @@ class GcpCloudProviderClient(CloudProviderClient):
 
     def list_monitoring(self, resource_id: str, lookback_minutes: int) -> ResourceUsageSnapshot:
         return fetch_instance_resource_usage(self.credentials, self.region, resource_id, lookback_minutes)  # type: ignore[return-value]
+
+    def list_resources(self, region: str) -> list[CloudResourceSummary]:
+        google_credentials, project_id = self._load_credentials()
+        client = compute_v1.InstancesClient(credentials=google_credentials)
+        try:
+            # Compute Engine instances are zone-scoped (e.g. "us-central1-a"),
+            # not region-scoped - aggregated_list() is the real API's own
+            # way of listing across every zone, filtered here to the zones
+            # that belong to the requested region.
+            aggregated = client.aggregated_list(project=project_id)
+            results: list[CloudResourceSummary] = []
+            for zone, scoped_list in aggregated:
+                zone_name = zone.split("/")[-1]
+                if not zone_name.startswith(f"{region}-"):
+                    continue
+                for instance in scoped_list.instances or []:
+                    results.append(
+                        {
+                            "id": str(instance.id),
+                            "name": instance.name,
+                            "type": instance.machine_type.split("/")[-1] if instance.machine_type else "unknown",
+                            "region": region,
+                            "status": instance.status or "unknown",
+                            "created_at": None,
+                        }
+                    )
+            return results
+        except (PermissionDenied, Unauthenticated) as exc:
+            raise ValidationAppError(
+                f"GCP rejected the credentials: {exc}", code="GCP_RESOURCE_INVENTORY_FAILED"
+            ) from exc
+        except GoogleAPICallError as exc:
+            raise ValidationAppError(
+                f"GCP rejected the resource-inventory request: {exc}", code="GCP_RESOURCE_INVENTORY_FAILED"
+            ) from exc
+
+    def list_clusters(self, region: str) -> list[CloudResourceSummary]:
+        google_credentials, project_id = self._load_credentials()
+        client = container_v1.ClusterManagerClient(credentials=google_credentials)
+        try:
+            response = client.list_clusters(parent=f"projects/{project_id}/locations/-")
+            return [
+                {
+                    "id": cluster.name,
+                    "name": cluster.name,
+                    "type": "gke",
+                    "region": region,
+                    "status": cluster.status.name if cluster.status else "unknown",
+                    "created_at": None,
+                }
+                for cluster in response.clusters
+                if cluster.location == region or cluster.zone.startswith(f"{region}-")
+            ]
+        except (PermissionDenied, Unauthenticated) as exc:
+            raise ValidationAppError(
+                f"GCP rejected the credentials: {exc}", code="GCP_CLUSTER_INVENTORY_FAILED"
+            ) from exc
+        except GoogleAPICallError as exc:
+            raise ValidationAppError(
+                f"GCP rejected the cluster-inventory request: {exc}", code="GCP_CLUSTER_INVENTORY_FAILED"
+            ) from exc
+
+    def list_databases(self, region: str) -> list[CloudResourceSummary]:
+        # Cloud SQL has no dedicated google-cloud-* client library - the
+        # real, official way to call it is the generic googleapiclient
+        # discovery-based sqladmin API, same as GCP's own gcloud CLI uses
+        # under the hood.
+        google_credentials, project_id = self._load_credentials()
+        try:
+            service = build_google_api_client("sqladmin", "v1beta4", credentials=google_credentials)
+            response = service.instances().list(project=project_id).execute()
+            return [
+                {
+                    "id": instance["name"],
+                    "name": instance["name"],
+                    "type": instance.get("databaseVersion", "unknown"),
+                    "region": region,
+                    "status": instance.get("state", "unknown"),
+                    "created_at": None,
+                }
+                for instance in response.get("items", [])
+                if instance.get("region") == region
+            ]
+        except HttpError as exc:
+            raise ValidationAppError(
+                f"GCP rejected the database-inventory request: {exc}", code="GCP_DATABASE_INVENTORY_FAILED"
+            ) from exc
+
+    def list_storage(self, region: str) -> list[CloudResourceSummary]:
+        google_credentials, project_id = self._load_credentials()
+        try:
+            client = storage.Client(credentials=google_credentials, project=project_id)
+            buckets = list(client.list_buckets())
+            return [
+                {
+                    "id": bucket.name,
+                    "name": bucket.name,
+                    "type": "gcs_bucket",
+                    "region": region,
+                    "status": "available",
+                    "created_at": bucket.time_created,
+                }
+                for bucket in buckets
+                if (bucket.location or "").lower() == region.lower()
+            ]
+        except GoogleAPICallError as exc:
+            raise ValidationAppError(
+                f"GCP rejected the storage-inventory request: {exc}", code="GCP_STORAGE_INVENTORY_FAILED"
+            ) from exc
+
+    def list_networking(self, region: str) -> list[CloudResourceSummary]:
+        # VPC networks are global resources in GCP, not region-scoped - the
+        # same result is returned regardless of which region is requested,
+        # disclosed honestly rather than fabricating a per-region filter
+        # the real API has no concept of (same stance as aws_provider.py's
+        # S3 disclosure).
+        google_credentials, project_id = self._load_credentials()
+        client = compute_v1.NetworksClient(credentials=google_credentials)
+        try:
+            networks = list(client.list(project=project_id))
+            return [
+                {
+                    "id": str(network.id),
+                    "name": network.name,
+                    "type": "vpc_network",
+                    "region": region,
+                    "status": "available",
+                    "created_at": None,
+                }
+                for network in networks
+            ]
+        except (PermissionDenied, Unauthenticated) as exc:
+            raise ValidationAppError(
+                f"GCP rejected the credentials: {exc}", code="GCP_NETWORKING_INVENTORY_FAILED"
+            ) from exc
+        except GoogleAPICallError as exc:
+            raise ValidationAppError(
+                f"GCP rejected the networking-inventory request: {exc}", code="GCP_NETWORKING_INVENTORY_FAILED"
+            ) from exc

@@ -32,7 +32,7 @@ import oci
 import tenacity
 from oci.exceptions import ServiceError
 
-from app.integrations.cloud_provider_client import CloudProviderClient, CloudRegionInfo
+from app.integrations.cloud_provider_client import CloudProviderClient, CloudRegionInfo, CloudResourceSummary
 from app.utils.exceptions import ValidationAppError
 
 _REQUIRED_CREDENTIAL_KEYS = ("user", "tenancy", "fingerprint", "key_content")
@@ -197,3 +197,129 @@ class OciCloudProviderClient(CloudProviderClient):
             "network_out_kbps": (network_out or 0.0) * 8 / 1000,
             "recorded_at": end_time,
         }
+
+    def _config_for(self, region: str) -> dict:
+        self.authenticate()
+        return {
+            "user": self.credentials["user"],
+            "tenancy": self.credentials["tenancy"],
+            "fingerprint": self.credentials["fingerprint"],
+            "key_content": self.credentials["key_content"],
+            "region": region,
+        }
+
+    def list_resources(self, region: str) -> list[CloudResourceSummary]:
+        config = self._config_for(region)
+        client = oci.core.ComputeClient(config)
+        try:
+            response = client.list_instances(self._compartment_id())
+        except ServiceError as exc:
+            raise ValidationAppError(
+                f"OCI rejected the resource-inventory request ({exc.code}): {exc.message}",
+                code="OCI_RESOURCE_INVENTORY_FAILED",
+            ) from exc
+
+        return [
+            {
+                "id": instance.id,
+                "name": instance.display_name,
+                "type": instance.shape,
+                "region": region,
+                "status": instance.lifecycle_state,
+                "created_at": instance.time_created,
+            }
+            for instance in response.data
+        ]
+
+    def list_clusters(self, region: str) -> list[CloudResourceSummary]:
+        config = self._config_for(region)
+        client = oci.container_engine.ContainerEngineClient(config)
+        try:
+            response = client.list_clusters(self._compartment_id())
+        except ServiceError as exc:
+            raise ValidationAppError(
+                f"OCI rejected the cluster-inventory request ({exc.code}): {exc.message}",
+                code="OCI_CLUSTER_INVENTORY_FAILED",
+            ) from exc
+
+        return [
+            {
+                "id": cluster.id,
+                "name": cluster.name,
+                "type": "oke",
+                "region": region,
+                "status": cluster.lifecycle_state,
+                "created_at": getattr(cluster.metadata, "time_created", None) if cluster.metadata else None,
+            }
+            for cluster in response.data
+        ]
+
+    def list_databases(self, region: str) -> list[CloudResourceSummary]:
+        config = self._config_for(region)
+        client = oci.database.DatabaseClient(config)
+        try:
+            response = client.list_db_systems(self._compartment_id())
+        except ServiceError as exc:
+            raise ValidationAppError(
+                f"OCI rejected the database-inventory request ({exc.code}): {exc.message}",
+                code="OCI_DATABASE_INVENTORY_FAILED",
+            ) from exc
+
+        return [
+            {
+                "id": db_system.id,
+                "name": db_system.display_name,
+                "type": db_system.database_edition or "db_system",
+                "region": region,
+                "status": db_system.lifecycle_state,
+                "created_at": db_system.time_created,
+            }
+            for db_system in response.data
+        ]
+
+    def list_storage(self, region: str) -> list[CloudResourceSummary]:
+        config = self._config_for(region)
+        client = oci.object_storage.ObjectStorageClient(config)
+        try:
+            namespace = client.get_namespace().data
+            response = client.list_buckets(namespace, self._compartment_id())
+        except ServiceError as exc:
+            raise ValidationAppError(
+                f"OCI rejected the storage-inventory request ({exc.code}): {exc.message}",
+                code="OCI_STORAGE_INVENTORY_FAILED",
+            ) from exc
+
+        return [
+            {
+                "id": bucket.name,
+                "name": bucket.name,
+                "type": "object_storage_bucket",
+                "region": region,
+                "status": "available",
+                "created_at": bucket.time_created,
+            }
+            for bucket in response.data
+        ]
+
+    def list_networking(self, region: str) -> list[CloudResourceSummary]:
+        config = self._config_for(region)
+        client = oci.core.VirtualNetworkClient(config)
+        try:
+            response = client.list_vcns(self._compartment_id())
+        except ServiceError as exc:
+            raise ValidationAppError(
+                f"OCI rejected the networking-inventory request ({exc.code}): {exc.message}",
+                code="OCI_NETWORKING_INVENTORY_FAILED",
+            ) from exc
+
+        return [
+            {
+                "id": vcn.id,
+                "name": vcn.display_name,
+                "type": "vcn",
+                "region": region,
+                "status": vcn.lifecycle_state,
+                "created_at": vcn.time_created,
+            }
+            for vcn in response.data
+        ]

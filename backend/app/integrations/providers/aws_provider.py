@@ -18,6 +18,7 @@ from app.integrations.aws_cost_explorer import fetch_monthly_costs_by_service
 from app.integrations.cloud_provider_client import (
     CloudProviderClient,
     CloudRegionInfo,
+    CloudResourceSummary,
     MonthlyServiceCost,
     ResourceUsageSnapshot,
 )
@@ -148,3 +149,140 @@ class AwsCloudProviderClient(CloudProviderClient):
 
     def list_costs(self, months: int) -> list[MonthlyServiceCost]:
         return fetch_monthly_costs_by_service(self.credentials, months)
+
+    def _client_kwargs_for(self, region: str) -> dict[str, str]:
+        self.authenticate()
+        kwargs: dict[str, str] = {
+            "region_name": region,
+            "aws_access_key_id": self.credentials["access_key_id"],
+            "aws_secret_access_key": self.credentials["secret_access_key"],
+        }
+        session_token = self.credentials.get("session_token")
+        if session_token:
+            kwargs["aws_session_token"] = session_token
+        endpoint_url = self.credentials.get("endpoint_url")
+        if endpoint_url:
+            kwargs["endpoint_url"] = endpoint_url
+        return kwargs
+
+    def _wrap_client_error(self, exc: botocore.exceptions.ClientError, code: str) -> ValidationAppError:
+        error_code = exc.response.get("Error", {}).get("Code", "Unknown")
+        message = exc.response.get("Error", {}).get("Message", str(exc))
+        return ValidationAppError(f"AWS rejected the request ({error_code}): {message}", code=code)
+
+    def list_resources(self, region: str) -> list[CloudResourceSummary]:
+        client = boto3.client("ec2", **self._client_kwargs_for(region))
+        try:
+            paginator = client.get_paginator("describe_instances")
+            results: list[CloudResourceSummary] = []
+            for page in paginator.paginate():
+                for reservation in page.get("Reservations", []):
+                    for instance in reservation.get("Instances", []):
+                        name = next(
+                            (t["Value"] for t in instance.get("Tags", []) if t.get("Key") == "Name"),
+                            instance["InstanceId"],
+                        )
+                        results.append(
+                            {
+                                "id": instance["InstanceId"],
+                                "name": name,
+                                "type": instance.get("InstanceType", "unknown"),
+                                "region": region,
+                                "status": instance.get("State", {}).get("Name", "unknown"),
+                                "created_at": instance.get("LaunchTime"),
+                            }
+                        )
+            return results
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_RESOURCE_INVENTORY_FAILED") from exc
+
+    def list_clusters(self, region: str) -> list[CloudResourceSummary]:
+        client = boto3.client("eks", **self._client_kwargs_for(region))
+        try:
+            cluster_names = client.list_clusters().get("clusters", [])
+            results: list[CloudResourceSummary] = []
+            for name in cluster_names:
+                detail = client.describe_cluster(name=name)["cluster"]
+                results.append(
+                    {
+                        "id": detail.get("arn", name),
+                        "name": name,
+                        "type": "eks",
+                        "region": region,
+                        "status": detail.get("status", "unknown"),
+                        "created_at": detail.get("createdAt"),
+                    }
+                )
+            return results
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_CLUSTER_INVENTORY_FAILED") from exc
+
+    def list_databases(self, region: str) -> list[CloudResourceSummary]:
+        client = boto3.client("rds", **self._client_kwargs_for(region))
+        try:
+            paginator = client.get_paginator("describe_db_instances")
+            results: list[CloudResourceSummary] = []
+            for page in paginator.paginate():
+                for db in page.get("DBInstances", []):
+                    results.append(
+                        {
+                            "id": db["DBInstanceIdentifier"],
+                            "name": db["DBInstanceIdentifier"],
+                            "type": db.get("Engine", "unknown"),
+                            "region": region,
+                            "status": db.get("DBInstanceStatus", "unknown"),
+                            "created_at": db.get("InstanceCreateTime"),
+                        }
+                    )
+            return results
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_DATABASE_INVENTORY_FAILED") from exc
+
+    def list_storage(self, region: str) -> list[CloudResourceSummary]:
+        # S3's ListBuckets is account-wide, not region-scoped - a bucket
+        # created in a different region still appears here (a real
+        # limitation of the S3 API itself, not something this platform can
+        # filter around without one extra get_bucket_location call per
+        # bucket). Every bucket is reported once regardless of which
+        # region was requested, disclosed honestly rather than silently
+        # pretending buckets are partitioned by region.
+        client = boto3.client("s3", **self._client_kwargs_for(region))
+        try:
+            buckets = client.list_buckets().get("Buckets", [])
+            return [
+                {
+                    "id": bucket["Name"],
+                    "name": bucket["Name"],
+                    "type": "s3_bucket",
+                    "region": region,
+                    "status": "available",
+                    "created_at": bucket.get("CreationDate"),
+                }
+                for bucket in buckets
+            ]
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_STORAGE_INVENTORY_FAILED") from exc
+
+    def list_networking(self, region: str) -> list[CloudResourceSummary]:
+        client = boto3.client("ec2", **self._client_kwargs_for(region))
+        try:
+            paginator = client.get_paginator("describe_vpcs")
+            results: list[CloudResourceSummary] = []
+            for page in paginator.paginate():
+                for vpc in page.get("Vpcs", []):
+                    name = next(
+                        (t["Value"] for t in vpc.get("Tags", []) if t.get("Key") == "Name"), vpc["VpcId"]
+                    )
+                    results.append(
+                        {
+                            "id": vpc["VpcId"],
+                            "name": name,
+                            "type": "vpc",
+                            "region": region,
+                            "status": vpc.get("State", "unknown"),
+                            "created_at": None,
+                        }
+                    )
+            return results
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_NETWORKING_INVENTORY_FAILED") from exc

@@ -12,10 +12,12 @@ from app.schemas.cloud_provider_account import (
     CloudProviderAccountUpdate,
 )
 from app.schemas.cloud_region import CloudAccountRegionsRead
+from app.schemas.cloud_resource import CloudResourceListRead
 from app.schemas.common import PaginatedResponse, PaginationMeta
 from app.schemas.resource_usage import ResourceUsageRead
 from app.services.cloud_provider_account_service import CloudProviderAccountService
 from app.services.cloud_region_sync_service import CloudRegionSyncService, load_available_regions
+from app.services.cloud_resource_inventory_service import CloudResourceInventoryService
 
 
 def _regions_read(account: CloudProviderAccount) -> CloudAccountRegionsRead:
@@ -32,6 +34,7 @@ class CloudProviderAccountController:
         self.db = db
         self.service = CloudProviderAccountService(db)
         self.region_sync_service = CloudRegionSyncService(db)
+        self.resource_inventory_service = CloudResourceInventoryService(db)
 
     def create(self, user_id: int, payload: CloudProviderAccountCreate) -> CloudProviderAccountRead:
         return CloudProviderAccountRead.model_validate(self.service.create(user_id, payload))
@@ -105,3 +108,9 @@ class CloudProviderAccountController:
     ) -> CloudProviderAccountRead:
         account = self.service.update_selected_region(account_id, current_user_id, selected_region)
         return CloudProviderAccountRead.model_validate(account)
+
+    def list_inventory(
+        self, account_id: int, current_user_id: int, category: str, region: str
+    ) -> CloudResourceListRead:
+        items = self.resource_inventory_service.list_resources(account_id, current_user_id, category, region)
+        return CloudResourceListRead(category=category, region=region, items=list(items))
