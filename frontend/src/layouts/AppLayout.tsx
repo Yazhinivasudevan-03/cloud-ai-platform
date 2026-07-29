@@ -19,46 +19,33 @@ import {
 import MenuIcon from "@mui/icons-material/Menu";
 import CloudQueueIcon from "@mui/icons-material/CloudQueue";
 import DashboardIcon from "@mui/icons-material/DashboardOutlined";
-import FolderIcon from "@mui/icons-material/FolderOutlined";
-import NotificationsActiveIcon from "@mui/icons-material/NotificationsActiveOutlined";
-import TuneIcon from "@mui/icons-material/TuneOutlined";
-import CloudQueueOutlinedIcon from "@mui/icons-material/CloudQueueOutlined";
-import MailOutlineIcon from "@mui/icons-material/MailOutline";
-import AccountCircleIcon from "@mui/icons-material/AccountCircleOutlined";
-import PeopleIcon from "@mui/icons-material/PeopleOutlined";
+import SettingsIcon from "@mui/icons-material/SettingsOutlined";
 import Brightness4Icon from "@mui/icons-material/Brightness4";
 import Brightness7Icon from "@mui/icons-material/Brightness7";
-import { useAuth } from "@/contexts/AuthContext";
 import { useThemeMode } from "@/contexts/ThemeModeContext";
 import { NotificationBell } from "@/components/NotificationBell";
 import { UserMenu } from "@/components/UserMenu";
 
 const DRAWER_WIDTH = 240;
 
-// Professional SaaS navigation (Phase 24): every major section gets its
-// own sidebar entry rather than being reachable only indirectly via
-// Dashboard stat cards (the pre-Phase-24 design - see docs/PHASE_16.md).
-const NAV_ITEMS = [
-  { label: "Dashboard", to: "/dashboard", icon: <DashboardIcon /> },
-  { label: "Projects", to: "/projects", icon: <FolderIcon /> },
-  { label: "Alerts", to: "/alerts", icon: <NotificationsActiveIcon /> },
-  { label: "Optimization", to: "/optimization", icon: <TuneIcon /> },
-  { label: "Cloud Accounts", to: "/cloud-accounts", icon: <CloudQueueOutlinedIcon /> },
-  { label: "Notifications", to: "/notifications", icon: <MailOutlineIcon /> },
-  { label: "Profile", to: "/profile", icon: <AccountCircleIcon /> },
-];
+// Simplified navigation: every other section (Projects, Alerts,
+// Optimization, Cloud Accounts, Notifications, Profile, and - for admins -
+// Users) is reachable from cards/sections on the Dashboard itself or from
+// the Settings/Profile icons in the top-right corner, so the sidebar's
+// only entry point is Dashboard. Nothing was removed - every route below
+// still exists and works exactly as before, just without its own
+// permanent sidebar slot (see docs/PHASE_16.md for the earlier design this
+// replaces).
+const NAV_ITEMS = [{ label: "Dashboard", to: "/dashboard", icon: <DashboardIcon /> }];
 
 export function AppLayout() {
   const theme = useTheme();
   const isSmallScreen = useMediaQuery(theme.breakpoints.down("md"));
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { hasRole } = useAuth();
   const { mode, toggleMode } = useThemeMode();
   const location = useLocation();
 
-  const navItems = hasRole("admin")
-    ? [...NAV_ITEMS, { label: "Users", to: "/users", icon: <PeopleIcon /> }]
-    : NAV_ITEMS;
+  const navItems = NAV_ITEMS;
 
   const drawerContent = (
     <Box>
@@ -109,6 +96,11 @@ export function AppLayout() {
           <Tooltip title={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
             <IconButton onClick={toggleMode} color="inherit" aria-label="Toggle theme">
               {mode === "dark" ? <Brightness7Icon /> : <Brightness4Icon />}
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Settings">
+            <IconButton component={NavLink} to="/settings" color="inherit" aria-label="Settings">
+              <SettingsIcon />
             </IconButton>
           </Tooltip>
           <NotificationBell />

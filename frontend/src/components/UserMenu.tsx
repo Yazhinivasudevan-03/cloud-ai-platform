@@ -3,12 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { Avatar, IconButton, ListItemIcon, Menu, MenuItem, Typography, Divider } from "@mui/material";
 import SettingsIcon from "@mui/icons-material/Settings";
 import NotificationsActiveIcon from "@mui/icons-material/NotificationsActive";
+import PeopleIcon from "@mui/icons-material/PeopleOutlined";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { useAuth } from "@/contexts/AuthContext";
 
 export function UserMenu() {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
-  const { user, logout } = useAuth();
+  const { user, logout, hasRole } = useAuth();
   const navigate = useNavigate();
 
   if (!user) return null;
@@ -53,6 +54,20 @@ export function UserMenu() {
           </ListItemIcon>
           Notification Settings
         </MenuItem>
+        {hasRole("admin") && (
+          <MenuItem
+            onClick={() => {
+              setAnchorEl(null);
+              navigate("/users");
+            }}
+          >
+            <ListItemIcon>
+              <PeopleIcon fontSize="small" />
+            </ListItemIcon>
+            Manage Users
+          </MenuItem>
+        )}
+        <Divider />
         <MenuItem
           onClick={() => {
             setAnchorEl(null);
