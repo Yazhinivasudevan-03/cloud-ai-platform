@@ -10,9 +10,6 @@ import MonitorHeartOutlinedIcon from "@mui/icons-material/MonitorHeartOutlined";
 import NotificationsActiveIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import TuneIcon from "@mui/icons-material/TuneOutlined";
 import MailIcon from "@mui/icons-material/MailOutlined";
-import AccountCircleIcon from "@mui/icons-material/AccountCircleOutlined";
-import SettingsIcon from "@mui/icons-material/SettingsOutlined";
-import PeopleIcon from "@mui/icons-material/PeopleOutlined";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { StatusChip } from "@/components/StatusChip";
@@ -34,7 +31,7 @@ import { useAuth } from "@/contexts/AuthContext";
 const ONBOARDING_PROVIDERS = KNOWN_PROVIDERS.filter((p) => p.value !== "other");
 
 export function DashboardPage() {
-  const { user, hasRole } = useAuth();
+  const { user } = useAuth();
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string | undefined>(undefined);
 
@@ -245,33 +242,6 @@ export function DashboardPage() {
           </Grid>
         </Grid>
       )}
-
-      <Paper sx={{ p: 2.5, mt: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Account
-        </Typography>
-        <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-          <Button component={RouterLink} to="/profile" variant="outlined" startIcon={<AccountCircleIcon />}>
-            Profile
-          </Button>
-          <Button component={RouterLink} to="/settings" variant="outlined" startIcon={<SettingsIcon />}>
-            Settings
-          </Button>
-          <Button
-            component={RouterLink}
-            to="/notification-settings"
-            variant="outlined"
-            startIcon={<NotificationsActiveIcon />}
-          >
-            Notification Settings
-          </Button>
-          {hasRole("admin") && (
-            <Button component={RouterLink} to="/users" variant="outlined" startIcon={<PeopleIcon />}>
-              Manage Users
-            </Button>
-          )}
-        </Stack>
-      </Paper>
 
       <CloudAccountFormDialog
         key={selectedProvider ?? "none"}
