@@ -161,7 +161,7 @@ export function CloudAccountFormDialog({
             <Autocomplete
               freeSolo
               options={regionSuggestions}
-              getOptionLabel={(option) => (typeof option === "string" ? option : `${option.code} (${option.label})`)}
+              getOptionLabel={(option) => (typeof option === "string" ? option : `${option.code} — ${option.label}`)}
               isOptionEqualToValue={(option, value) =>
                 typeof value === "string" ? option.code === value : option.code === value.code
               }
