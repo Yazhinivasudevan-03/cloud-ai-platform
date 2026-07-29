@@ -66,7 +66,50 @@ def test_list_regions_wraps_a_rejected_request(mock_client_cls):
     client = OciCloudProviderClient(FAKE_CREDENTIALS, "us-ashburn-1")
     with pytest.raises(ValidationAppError) as exc_info:
         client.list_regions()
-    assert exc_info.value.code == "OCI_REGION_DISCOVERY_FAILED"
+    assert exc_info.value.code == "OCI_REGION_CREDENTIALS_REJECTED"
+
+
+@patch("app.integrations.providers.oci_provider.oci.identity.IdentityClient")
+def test_list_regions_reports_access_denied(mock_client_cls):
+    mock_client_cls.return_value.list_region_subscriptions.side_effect = ServiceError(
+        403, "NotAuthorized", {}, "not authorized"
+    )
+    client = OciCloudProviderClient(FAKE_CREDENTIALS, "us-ashburn-1")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "OCI_REGION_ACCESS_DENIED"
+
+
+@patch("app.integrations.providers.oci_provider.oci.identity.IdentityClient")
+def test_list_regions_reports_throttled_after_retries_exhausted(mock_client_cls):
+    mock_client_cls.return_value.list_region_subscriptions.side_effect = ServiceError(
+        429, "TooManyRequests", {}, "slow down"
+    )
+    client = OciCloudProviderClient(FAKE_CREDENTIALS, "us-ashburn-1")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "OCI_REGION_THROTTLED"
+    assert mock_client_cls.return_value.list_region_subscriptions.call_count == 3
+
+
+@patch("app.integrations.providers.oci_provider.oci.identity.IdentityClient")
+def test_list_regions_reports_provider_outage(mock_client_cls):
+    mock_client_cls.return_value.list_region_subscriptions.side_effect = ServiceError(
+        500, "InternalServerError", {}, "internal error"
+    )
+    client = OciCloudProviderClient(FAKE_CREDENTIALS, "us-ashburn-1")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "OCI_REGION_PROVIDER_OUTAGE"
+
+
+@patch("app.integrations.providers.oci_provider.oci.identity.IdentityClient")
+def test_list_regions_reports_no_regions_returned(mock_client_cls):
+    mock_client_cls.return_value.list_region_subscriptions.return_value = SimpleNamespace(data=[])
+    client = OciCloudProviderClient(FAKE_CREDENTIALS, "us-ashburn-1")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "OCI_REGION_NO_REGIONS_RETURNED"
 
 
 # --- list_monitoring -----------------------------------------------------

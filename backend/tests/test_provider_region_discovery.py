@@ -10,9 +10,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import boto3
+import botocore.exceptions
 import pytest
-from azure.core.exceptions import ClientAuthenticationError
-from google.api_core.exceptions import PermissionDenied
+from azure.core.exceptions import ClientAuthenticationError, HttpResponseError, ServiceRequestError
+from google.api_core.exceptions import PermissionDenied, ServiceUnavailable, TooManyRequests
 from moto import mock_aws
 
 from app.integrations.provider_factory import get_cloud_provider_client, supported_providers
@@ -55,6 +56,100 @@ def test_aws_list_projects_returns_real_account_id():
     projects = client.list_projects()
     assert len(projects) == 1
     assert projects[0].isdigit()
+
+
+# --- AWS region-discovery error taxonomy (Phase 25E) -----------------------
+# Moto doesn't validate credentials or simulate throttling/outages, so these
+# scenarios patch boto3.client directly, mirroring the established pattern
+# already used for the same purpose in test_aws_cloudwatch.py/
+# test_aws_cost_explorer.py.
+
+
+def _client_error(code: str, message: str = "boom") -> botocore.exceptions.ClientError:
+    return botocore.exceptions.ClientError({"Error": {"Code": code, "Message": message}}, "DescribeRegions")
+
+
+def test_aws_list_regions_reports_expired_credentials():
+    client = AwsCloudProviderClient({"access_key_id": "x", "secret_access_key": "y"}, "us-east-1")
+    with patch("boto3.client") as mock_client_factory:
+        mock_client_factory.return_value.describe_regions.side_effect = _client_error("ExpiredToken")
+        with pytest.raises(ValidationAppError) as exc_info:
+            client.list_regions()
+    assert exc_info.value.code == "AWS_REGION_CREDENTIALS_EXPIRED"
+
+
+def test_aws_list_regions_reports_access_denied():
+    client = AwsCloudProviderClient({"access_key_id": "x", "secret_access_key": "y"}, "us-east-1")
+    with patch("boto3.client") as mock_client_factory:
+        mock_client_factory.return_value.describe_regions.side_effect = _client_error("UnauthorizedOperation")
+        with pytest.raises(ValidationAppError) as exc_info:
+            client.list_regions()
+    assert exc_info.value.code == "AWS_REGION_ACCESS_DENIED"
+
+
+def test_aws_list_regions_reports_throttled_after_retries_exhausted():
+    client = AwsCloudProviderClient({"access_key_id": "x", "secret_access_key": "y"}, "us-east-1")
+    with patch("boto3.client") as mock_client_factory:
+        mock_client_factory.return_value.describe_regions.side_effect = _client_error("Throttling")
+        with pytest.raises(ValidationAppError) as exc_info:
+            client.list_regions()
+    assert exc_info.value.code == "AWS_REGION_THROTTLED"
+    # 3 attempts (the configured stop_after_attempt) prove the retry
+    # actually ran, not just that failure was eventually reported.
+    assert mock_client_factory.return_value.describe_regions.call_count == 3
+
+
+def test_aws_list_regions_retries_a_transient_error_then_succeeds():
+    client = AwsCloudProviderClient({"access_key_id": "x", "secret_access_key": "y"}, "us-east-1")
+    success_response = {"Regions": [{"RegionName": "us-east-1"}]}
+    with patch("boto3.client") as mock_client_factory:
+        mock_client_factory.return_value.describe_regions.side_effect = [
+            _client_error("Throttling"),
+            success_response,
+        ]
+        regions = client.list_regions()
+    assert regions == [{"id": "us-east-1", "display_name": "US East (N. Virginia)"}]
+    assert mock_client_factory.return_value.describe_regions.call_count == 2
+
+
+def test_aws_list_regions_reports_provider_outage():
+    client = AwsCloudProviderClient({"access_key_id": "x", "secret_access_key": "y"}, "us-east-1")
+    with patch("boto3.client") as mock_client_factory:
+        mock_client_factory.return_value.describe_regions.side_effect = _client_error("ServiceUnavailable")
+        with pytest.raises(ValidationAppError) as exc_info:
+            client.list_regions()
+    assert exc_info.value.code == "AWS_REGION_PROVIDER_OUTAGE"
+
+
+def test_aws_list_regions_reports_timeout():
+    client = AwsCloudProviderClient({"access_key_id": "x", "secret_access_key": "y"}, "us-east-1")
+    with patch("boto3.client") as mock_client_factory:
+        mock_client_factory.return_value.describe_regions.side_effect = botocore.exceptions.ConnectTimeoutError(
+            endpoint_url="https://ec2.us-east-1.amazonaws.com"
+        )
+        with pytest.raises(ValidationAppError) as exc_info:
+            client.list_regions()
+    assert exc_info.value.code == "AWS_REGION_TIMEOUT"
+
+
+def test_aws_list_regions_reports_network_unreachable():
+    client = AwsCloudProviderClient({"access_key_id": "x", "secret_access_key": "y"}, "us-east-1")
+    with patch("boto3.client") as mock_client_factory:
+        mock_client_factory.return_value.describe_regions.side_effect = botocore.exceptions.EndpointConnectionError(
+            endpoint_url="https://ec2.us-east-1.amazonaws.com"
+        )
+        with pytest.raises(ValidationAppError) as exc_info:
+            client.list_regions()
+    assert exc_info.value.code == "AWS_REGION_NETWORK_UNREACHABLE"
+
+
+def test_aws_list_regions_reports_no_regions_returned():
+    client = AwsCloudProviderClient({"access_key_id": "x", "secret_access_key": "y"}, "us-east-1")
+    with patch("boto3.client") as mock_client_factory:
+        mock_client_factory.return_value.describe_regions.return_value = {"Regions": []}
+        with pytest.raises(ValidationAppError) as exc_info:
+            client.list_regions()
+    assert exc_info.value.code == "AWS_REGION_NO_REGIONS_RETURNED"
 
 
 # --- Azure (patched SDK client) -------------------------------------------
@@ -104,7 +199,52 @@ def test_azure_list_regions_wraps_bad_credentials(mock_client_cls, _mock_cred):
     client = AzureCloudProviderClient(AZURE_CREDENTIALS, "eastus")
     with pytest.raises(ValidationAppError) as exc_info:
         client.list_regions()
-    assert exc_info.value.code == "AZURE_REGION_DISCOVERY_FAILED"
+    assert exc_info.value.code == "AZURE_REGION_CREDENTIALS_REJECTED"
+
+
+@patch("app.integrations.providers.azure_provider.ClientSecretCredential")
+@patch("app.integrations.providers.azure_provider.SubscriptionClient")
+def test_azure_list_regions_reports_throttled_after_retries_exhausted(mock_client_cls, _mock_cred):
+    error = HttpResponseError(message="too many requests")
+    error.status_code = 429
+    mock_client_cls.return_value.subscriptions.list_locations.side_effect = error
+    client = AzureCloudProviderClient(AZURE_CREDENTIALS, "eastus")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "AZURE_REGION_THROTTLED"
+    assert mock_client_cls.return_value.subscriptions.list_locations.call_count == 3
+
+
+@patch("app.integrations.providers.azure_provider.ClientSecretCredential")
+@patch("app.integrations.providers.azure_provider.SubscriptionClient")
+def test_azure_list_regions_reports_provider_outage(mock_client_cls, _mock_cred):
+    error = HttpResponseError(message="internal error")
+    error.status_code = 503
+    mock_client_cls.return_value.subscriptions.list_locations.side_effect = error
+    client = AzureCloudProviderClient(AZURE_CREDENTIALS, "eastus")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "AZURE_REGION_PROVIDER_OUTAGE"
+
+
+@patch("app.integrations.providers.azure_provider.ClientSecretCredential")
+@patch("app.integrations.providers.azure_provider.SubscriptionClient")
+def test_azure_list_regions_reports_network_unreachable(mock_client_cls, _mock_cred):
+    mock_client_cls.return_value.subscriptions.list_locations.side_effect = ServiceRequestError("DNS failure")
+    client = AzureCloudProviderClient(AZURE_CREDENTIALS, "eastus")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "AZURE_REGION_NETWORK_UNREACHABLE"
+
+
+@patch("app.integrations.providers.azure_provider.ClientSecretCredential")
+@patch("app.integrations.providers.azure_provider.SubscriptionClient")
+def test_azure_list_regions_reports_no_regions_returned(mock_client_cls, _mock_cred):
+    mock_client_cls.return_value.subscriptions.list_locations.return_value = []
+    client = AzureCloudProviderClient(AZURE_CREDENTIALS, "eastus")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "AZURE_REGION_NO_REGIONS_RETURNED"
 
 
 # --- GCP (patched SDK client) ----------------------------------------------
@@ -148,7 +288,38 @@ def test_gcp_list_regions_wraps_permission_denied(mock_client_cls, _mock_service
     client = GcpCloudProviderClient(GCP_CREDENTIALS, "us-central1")
     with pytest.raises(ValidationAppError) as exc_info:
         client.list_regions()
-    assert exc_info.value.code == "GCP_REGION_DISCOVERY_FAILED"
+    assert exc_info.value.code == "GCP_REGION_ACCESS_DENIED"
+
+
+@patch("app.integrations.providers.gcp_provider.service_account")
+@patch("app.integrations.providers.gcp_provider.compute_v1.RegionsClient")
+def test_gcp_list_regions_reports_throttled_after_retries_exhausted(mock_client_cls, _mock_service_account):
+    mock_client_cls.return_value.list.side_effect = TooManyRequests("rate limited")
+    client = GcpCloudProviderClient(GCP_CREDENTIALS, "us-central1")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "GCP_REGION_THROTTLED"
+    assert mock_client_cls.return_value.list.call_count == 3
+
+
+@patch("app.integrations.providers.gcp_provider.service_account")
+@patch("app.integrations.providers.gcp_provider.compute_v1.RegionsClient")
+def test_gcp_list_regions_reports_provider_outage(mock_client_cls, _mock_service_account):
+    mock_client_cls.return_value.list.side_effect = ServiceUnavailable("down for maintenance")
+    client = GcpCloudProviderClient(GCP_CREDENTIALS, "us-central1")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "GCP_REGION_PROVIDER_OUTAGE"
+
+
+@patch("app.integrations.providers.gcp_provider.service_account")
+@patch("app.integrations.providers.gcp_provider.compute_v1.RegionsClient")
+def test_gcp_list_regions_reports_no_regions_returned(mock_client_cls, _mock_service_account):
+    mock_client_cls.return_value.list.return_value = []
+    client = GcpCloudProviderClient(GCP_CREDENTIALS, "us-central1")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "GCP_REGION_NO_REGIONS_RETURNED"
 
 
 # --- provider_factory -------------------------------------------------------

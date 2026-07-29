@@ -34,6 +34,24 @@ def test_create_cloud_provider_account_succeeds_and_hides_credentials(client, ma
     assert "credentials_encrypted" not in body
 
 
+def test_create_cloud_provider_account_defaults_region_to_all_when_omitted(client, make_user_with_role):
+    # Phase 25E: "All Regions" is the default enterprise mode for a caller
+    # that doesn't name a specific region up front - this platform's own
+    # "Connect Cloud Account" UI always supplies one (for its region+
+    # timezone auto-association flow, see test_create_cloud_provider_account_succeeds_and_hides_credentials
+    # above), so this only changes behavior for a caller that omits it.
+    token = make_user_with_role("cloud_user_all_regions")
+    payload = _payload(account_name="no-region-account")
+    del payload["region"]
+
+    response = client.post(
+        "/api/v1/cloud-provider-accounts", json=payload, headers=_auth_header(token)
+    )
+
+    assert response.status_code == 201
+    assert response.json()["region"] == "all"
+
+
 def test_create_cloud_provider_account_accepts_any_provider_name(client, make_user_with_role):
     token = make_user_with_role("cloud_user_b")
     response = client.post(

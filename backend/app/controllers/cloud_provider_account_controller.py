@@ -1,8 +1,10 @@
 """Controller layer for a user's own CloudProviderAccount endpoints."""
 import math
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from app.config.settings import get_settings
 from app.models.cloud_provider_account import CloudProviderAccount
 from app.schemas.alert import AlertRead
 from app.schemas.cloud_provider_account import (
@@ -88,16 +90,26 @@ class CloudProviderAccountController:
         return [AlertRead.model_validate(a) for a in alerts]
 
     def get_regions(self, account_id: int, current_user_id: int) -> CloudAccountRegionsRead:
-        """Serves the account's stored region snapshot as-is, except for an
-        account that has never been synced yet (last_region_sync is null) -
-        that case triggers one real, live discovery call immediately, so a
-        newly-connected account isn't stuck showing an empty region list
-        until the next scheduled sweep runs."""
+        """Serves the account's stored region snapshot as-is, unless it's
+        stale - either never synced yet (last_region_sync is null) or older
+        than CLOUD_REGION_CACHE_TTL_HOURS (Phase 25E) - in which case one
+        real, live discovery call is made first. This bounds how out of
+        date a region list served here can ever be to one TTL window,
+        without requiring a live provider call on every single read (that's
+        what "Refresh Regions" bypasses this cache for)."""
         account = self.service.get_own(account_id, current_user_id)
-        if account.last_region_sync is None:
+        if self._is_region_cache_stale(account):
             result = self.region_sync_service.sync_account(account_id, current_user_id)
             account = result.account
         return _regions_read(account)
+
+    @staticmethod
+    def _is_region_cache_stale(account: CloudProviderAccount) -> bool:
+        if account.last_region_sync is None:
+            return True
+        ttl = timedelta(hours=get_settings().CLOUD_REGION_CACHE_TTL_HOURS)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        return now - account.last_region_sync > ttl
 
     def refresh_regions(self, account_id: int, current_user_id: int) -> CloudAccountRegionsRead:
         """Always bypasses whatever was previously stored and makes a real,

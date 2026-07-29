@@ -38,7 +38,7 @@ class CloudProviderAccountService:
             user_id=user_id,
             provider=payload.provider,
             account_name=payload.account_name,
-            region=payload.region,
+            region=payload.region or ALL_REGIONS_SENTINEL,
             account_identifier=payload.account_identifier,
             credentials_encrypted=encrypt_credentials(payload.credentials),
         )

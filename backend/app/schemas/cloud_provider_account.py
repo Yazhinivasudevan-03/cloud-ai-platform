@@ -32,6 +32,14 @@ class CloudProviderAccountBase(BaseModel):
 
 
 class CloudProviderAccountCreate(CloudProviderAccountBase):
+    # Overrides the base class's required `region` - Phase 25E's "All
+    # Regions is the default enterprise mode": a caller that doesn't name a
+    # specific region gets "all" (the aggregate sentinel - see
+    # ALL_REGIONS_SENTINEL) rather than being forced to pick one up front.
+    # A caller that does supply one (as this platform's own "Connect Cloud
+    # Account" UI always does, for its region+timezone auto-association
+    # flow) keeps that exact value, unchanged from before this phase.
+    region: str | None = Field(default=None, min_length=1, max_length=50)
     credentials: dict[str, str] = Field(
         ..., min_length=1, description="Provider-specific credential key/value pairs, encrypted at rest"
     )

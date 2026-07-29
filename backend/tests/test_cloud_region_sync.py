@@ -4,10 +4,12 @@ and notification dispatch, and sync_all_regions()'s per-account tolerance -
 verified against moto's real EC2 emulation (the same faithful boto3 request
 path test_cloud_sync.py already relies on for CloudWatch)."""
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from moto import mock_aws
 
+from app.config.settings import get_settings
 from app.models.alert import Alert
 from app.models.cloud_provider_account import CloudProviderAccount
 from app.models.notification import Notification
@@ -64,6 +66,60 @@ def test_get_regions_serves_the_cached_snapshot_on_a_second_call(client, make_us
     # what the first sync produced.
     assert second["last_region_sync"] == first["last_region_sync"]
     assert second["regions"] == first["regions"]
+
+
+@mock_aws
+def test_get_regions_triggers_a_live_sync_once_the_cache_ttl_expires(client, make_user_with_role, db_session):
+    # Phase 25E: CLOUD_REGION_CACHE_TTL_HOURS bounds how stale a served
+    # region snapshot can ever be - a last_region_sync older than the TTL
+    # must trigger a fresh live call, exactly like a never-synced account.
+    token = make_user_with_role("region_op_ttl", "operator")
+    me = client.get("/api/v1/auth/me", headers=_auth_header(token)).json()
+    account = _make_cloud_account(db_session, me["id"], "ttl")
+
+    client.get(f"/api/v1/cloud-provider-accounts/{account.id}/regions", headers=_auth_header(token))
+
+    ttl_hours = get_settings().CLOUD_REGION_CACHE_TTL_HOURS
+    stale_sync_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=ttl_hours + 1)
+    db_session.query(CloudProviderAccount).filter(CloudProviderAccount.id == account.id).update(
+        {"last_region_sync": stale_sync_time}
+    )
+    db_session.commit()
+
+    second = client.get(f"/api/v1/cloud-provider-accounts/{account.id}/regions", headers=_auth_header(token)).json()
+
+    # A real resync must have replaced the stale timestamp with a recent
+    # one - compared against the known artificial past value (not the
+    # first call's timestamp) so this doesn't depend on the two live calls
+    # landing in different seconds under MySQL's DATETIME's whole-second
+    # precision.
+    returned = datetime.fromisoformat(second["last_region_sync"])
+    assert (returned - stale_sync_time).total_seconds() > 3600
+
+
+@mock_aws
+def test_get_regions_does_not_resync_within_the_cache_ttl(client, make_user_with_role, db_session):
+    token = make_user_with_role("region_op_fresh", "operator")
+    me = client.get("/api/v1/auth/me", headers=_auth_header(token)).json()
+    account = _make_cloud_account(db_session, me["id"], "fresh")
+
+    client.get(f"/api/v1/cloud-provider-accounts/{account.id}/regions", headers=_auth_header(token))
+
+    ttl_hours = get_settings().CLOUD_REGION_CACHE_TTL_HOURS
+    still_fresh_sync_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=ttl_hours - 1)
+    db_session.query(CloudProviderAccount).filter(CloudProviderAccount.id == account.id).update(
+        {"last_region_sync": still_fresh_sync_time}
+    )
+    db_session.commit()
+
+    second = client.get(f"/api/v1/cloud-provider-accounts/{account.id}/regions", headers=_auth_header(token)).json()
+
+    # Still within the TTL window - last_region_sync must be served as
+    # stored (MySQL's DATETIME column truncates microseconds, so compare
+    # with a small tolerance rather than exact string equality), not
+    # overwritten by a fresh live call.
+    returned = datetime.fromisoformat(second["last_region_sync"])
+    assert abs((returned - still_fresh_sync_time).total_seconds()) < 2
 
 
 @mock_aws

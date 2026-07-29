@@ -65,7 +65,50 @@ def test_list_regions_wraps_a_rejected_request(mock_client_cls):
     client = AlibabaCloudProviderClient(FAKE_CREDENTIALS, "cn-hangzhou")
     with pytest.raises(ValidationAppError) as exc_info:
         client.list_regions()
-    assert exc_info.value.code == "ALIBABA_REGION_DISCOVERY_FAILED"
+    assert exc_info.value.code == "ALIBABA_REGION_CREDENTIALS_REJECTED"
+
+
+@patch("app.integrations.providers.alibaba_provider.EcsClient")
+def test_list_regions_reports_access_denied(mock_client_cls):
+    mock_client_cls.return_value.describe_regions.side_effect = TeaException(
+        {"code": "Forbidden.RAM", "message": "not authorized"}
+    )
+    client = AlibabaCloudProviderClient(FAKE_CREDENTIALS, "cn-hangzhou")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "ALIBABA_REGION_ACCESS_DENIED"
+
+
+@patch("app.integrations.providers.alibaba_provider.EcsClient")
+def test_list_regions_reports_throttled_after_retries_exhausted(mock_client_cls):
+    mock_client_cls.return_value.describe_regions.side_effect = TeaException(
+        {"code": "Throttling", "message": "slow down"}
+    )
+    client = AlibabaCloudProviderClient(FAKE_CREDENTIALS, "cn-hangzhou")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "ALIBABA_REGION_THROTTLED"
+    assert mock_client_cls.return_value.describe_regions.call_count == 3
+
+
+@patch("app.integrations.providers.alibaba_provider.EcsClient")
+def test_list_regions_reports_provider_outage(mock_client_cls):
+    mock_client_cls.return_value.describe_regions.side_effect = TeaException(
+        {"code": "ServiceUnavailable", "message": "down"}
+    )
+    client = AlibabaCloudProviderClient(FAKE_CREDENTIALS, "cn-hangzhou")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "ALIBABA_REGION_PROVIDER_OUTAGE"
+
+
+@patch("app.integrations.providers.alibaba_provider.EcsClient")
+def test_list_regions_reports_no_regions_returned(mock_client_cls):
+    mock_client_cls.return_value.describe_regions.return_value = _fake_regions_response()
+    client = AlibabaCloudProviderClient(FAKE_CREDENTIALS, "cn-hangzhou")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_regions()
+    assert exc_info.value.code == "ALIBABA_REGION_NO_REGIONS_RETURNED"
 
 
 # --- list_monitoring -----------------------------------------------------

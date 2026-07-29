@@ -52,6 +52,30 @@ _azure_retry = tenacity.retry(
     reraise=True,
 )
 
+# Phase 25E: region-discovery error taxonomy (see aws_provider.py's
+# identical rationale) - Azure's ClientAuthenticationError doesn't itself
+# distinguish "expired" from "otherwise invalid" credentials, so both fold
+# into CREDENTIALS_REJECTED rather than fabricating a distinction Azure's
+# own SDK doesn't expose.
+def _classify_azure_region_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, ClientAuthenticationError):
+        return "AZURE_REGION_CREDENTIALS_REJECTED", f"Azure rejected the credentials: {exc}"
+    if isinstance(exc, HttpResponseError):
+        status = exc.status_code
+        message = exc.message or str(exc)
+        if status in (401, 403):
+            return "AZURE_REGION_ACCESS_DENIED", f"Azure denied access to the region-discovery request: {message}"
+        if status == 429:
+            return "AZURE_REGION_THROTTLED", f"Azure throttled the region-discovery request even after retries: {message}"
+        if status is not None and status >= 500:
+            return "AZURE_REGION_PROVIDER_OUTAGE", f"Azure reported a service outage: {message}"
+        return "AZURE_REGION_DISCOVERY_FAILED", f"Azure rejected the region-discovery request: {message}"
+    # ServiceRequestError - Azure doesn't distinguish a slow connection
+    # (timeout) from a fully unreachable one at this layer, so both are
+    # disclosed honestly as one "network unreachable" category rather than
+    # a fabricated split.
+    return "AZURE_REGION_NETWORK_UNREACHABLE", f"Could not reach Azure to discover regions: {exc}"
+
 
 class AzureCloudProviderClient(CloudProviderClient):
     @property
@@ -84,24 +108,21 @@ class AzureCloudProviderClient(CloudProviderClient):
 
         try:
             locations = _list_locations()
-        except ClientAuthenticationError as exc:
-            raise ValidationAppError(
-                f"Azure rejected the credentials: {exc}", code="AZURE_REGION_DISCOVERY_FAILED"
-            ) from exc
-        except HttpResponseError as exc:
-            raise ValidationAppError(
-                f"Azure rejected the region-discovery request: {exc.message or exc}",
-                code="AZURE_REGION_DISCOVERY_FAILED",
-            ) from exc
-        except ServiceRequestError as exc:
-            raise ValidationAppError(
-                f"Could not reach Azure to discover regions: {exc}", code="AZURE_REGION_DISCOVERY_FAILED"
-            ) from exc
+        except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
+            code, message = _classify_azure_region_error(exc)
+            raise ValidationAppError(message, code=code) from exc
 
-        return [
+        regions = [
             {"id": location.name, "display_name": location.display_name or location.name}
             for location in locations
         ]
+        if not regions:
+            raise ValidationAppError(
+                "Azure returned zero locations for this subscription - unexpected for a working "
+                "subscription, and treated as a failure rather than a legitimately empty result",
+                code="AZURE_REGION_NO_REGIONS_RETURNED",
+            )
+        return regions
 
     def list_projects(self) -> list[str]:
         client = SubscriptionClient(self._credential())
@@ -141,8 +162,13 @@ class AzureCloudProviderClient(CloudProviderClient):
 
     def list_resources(self, region: str) -> list[CloudResourceSummary]:
         client = ComputeManagementClient(self._credential(), self._subscription_id())
+
+        @_azure_retry
+        def _list_all():
+            return list(client.virtual_machines.list_all())
+
         try:
-            vms = list(client.virtual_machines.list_all())
+            vms = _list_all()
         except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
             raise self._wrap_azure_error(exc, "AZURE_RESOURCE_INVENTORY_FAILED") from exc
 
@@ -161,8 +187,13 @@ class AzureCloudProviderClient(CloudProviderClient):
 
     def list_clusters(self, region: str) -> list[CloudResourceSummary]:
         client = ContainerServiceClient(self._credential(), self._subscription_id())
+
+        @_azure_retry
+        def _list_clusters():
+            return list(client.managed_clusters.list())
+
         try:
-            clusters = list(client.managed_clusters.list())
+            clusters = _list_clusters()
         except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
             raise self._wrap_azure_error(exc, "AZURE_CLUSTER_INVENTORY_FAILED") from exc
 
@@ -181,8 +212,13 @@ class AzureCloudProviderClient(CloudProviderClient):
 
     def list_databases(self, region: str) -> list[CloudResourceSummary]:
         client = SqlManagementClient(self._credential(), self._subscription_id())
+
+        @_azure_retry
+        def _list_servers():
+            return list(client.servers.list())
+
         try:
-            servers = list(client.servers.list())
+            servers = _list_servers()
         except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
             raise self._wrap_azure_error(exc, "AZURE_DATABASE_INVENTORY_FAILED") from exc
 
@@ -201,8 +237,13 @@ class AzureCloudProviderClient(CloudProviderClient):
 
     def list_storage(self, region: str) -> list[CloudResourceSummary]:
         client = StorageManagementClient(self._credential(), self._subscription_id())
+
+        @_azure_retry
+        def _list_storage_accounts():
+            return list(client.storage_accounts.list())
+
         try:
-            accounts = list(client.storage_accounts.list())
+            accounts = _list_storage_accounts()
         except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
             raise self._wrap_azure_error(exc, "AZURE_STORAGE_INVENTORY_FAILED") from exc
 
@@ -221,8 +262,13 @@ class AzureCloudProviderClient(CloudProviderClient):
 
     def list_networking(self, region: str) -> list[CloudResourceSummary]:
         client = NetworkManagementClient(self._credential(), self._subscription_id())
+
+        @_azure_retry
+        def _list_vnets():
+            return list(client.virtual_networks.list_all())
+
         try:
-            vnets = list(client.virtual_networks.list_all())
+            vnets = _list_vnets()
         except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
             raise self._wrap_azure_error(exc, "AZURE_NETWORKING_INVENTORY_FAILED") from exc
 

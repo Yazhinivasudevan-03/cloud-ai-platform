@@ -85,6 +85,23 @@ _oci_retry = tenacity.retry(
 )
 
 
+# Phase 25E: region-discovery error taxonomy (see aws_provider.py's
+# identical rationale) - OCI's ServiceError already exposes a real HTTP
+# status per failure, so the categories below are read directly from it,
+# never guessed.
+def _classify_oci_region_error(exc: ServiceError) -> tuple[str, str]:
+    message = f"OCI rejected the region-discovery request ({exc.code}): {exc.message}"
+    if exc.status == 401:
+        return "OCI_REGION_CREDENTIALS_REJECTED", f"OCI rejected the credentials ({exc.code}): {exc.message}"
+    if exc.status == 403:
+        return "OCI_REGION_ACCESS_DENIED", message
+    if exc.status == 429:
+        return "OCI_REGION_THROTTLED", f"OCI throttled the region-discovery request even after retries: {exc.message}"
+    if exc.status >= 500:
+        return "OCI_REGION_PROVIDER_OUTAGE", f"OCI reported a service outage: {exc.message}"
+    return "OCI_REGION_DISCOVERY_FAILED", message
+
+
 class OciCloudProviderClient(CloudProviderClient):
     @property
     def provider_name(self) -> str:
@@ -127,12 +144,10 @@ class OciCloudProviderClient(CloudProviderClient):
         try:
             response = _list_region_subscriptions()
         except ServiceError as exc:
-            raise ValidationAppError(
-                f"OCI rejected the region-discovery request ({exc.code}): {exc.message}",
-                code="OCI_REGION_DISCOVERY_FAILED",
-            ) from exc
+            code, message = _classify_oci_region_error(exc)
+            raise ValidationAppError(message, code=code) from exc
 
-        return [
+        regions = [
             {
                 "id": subscription.region_name,
                 "display_name": _OCI_REGION_DISPLAY_NAMES.get(subscription.region_name, subscription.region_name),
@@ -143,6 +158,13 @@ class OciCloudProviderClient(CloudProviderClient):
             # choice yet, so it's excluded rather than shown as available.
             if getattr(subscription, "status", "READY") == "READY"
         ]
+        if not regions:
+            raise ValidationAppError(
+                "OCI returned zero ready region subscriptions for this tenancy - unexpected for a "
+                "working tenancy, and treated as a failure rather than a legitimately empty result",
+                code="OCI_REGION_NO_REGIONS_RETURNED",
+            )
+        return regions
 
     def list_monitoring(self, resource_id: str, lookback_minutes: int) -> InstanceResourceUsage:
         """Queries real OCI Monitoring (via MQL) for a single Compute
@@ -216,8 +238,13 @@ class OciCloudProviderClient(CloudProviderClient):
     def list_resources(self, region: str) -> list[CloudResourceSummary]:
         config = self._config_for(region)
         client = oci.core.ComputeClient(config)
+
+        @_oci_retry
+        def _list_instances():
+            return client.list_instances(self._compartment_id())
+
         try:
-            response = client.list_instances(self._compartment_id())
+            response = _list_instances()
         except ServiceError as exc:
             raise ValidationAppError(
                 f"OCI rejected the resource-inventory request ({exc.code}): {exc.message}",
@@ -239,8 +266,13 @@ class OciCloudProviderClient(CloudProviderClient):
     def list_clusters(self, region: str) -> list[CloudResourceSummary]:
         config = self._config_for(region)
         client = oci.container_engine.ContainerEngineClient(config)
+
+        @_oci_retry
+        def _list_clusters():
+            return client.list_clusters(self._compartment_id())
+
         try:
-            response = client.list_clusters(self._compartment_id())
+            response = _list_clusters()
         except ServiceError as exc:
             raise ValidationAppError(
                 f"OCI rejected the cluster-inventory request ({exc.code}): {exc.message}",
@@ -262,8 +294,13 @@ class OciCloudProviderClient(CloudProviderClient):
     def list_databases(self, region: str) -> list[CloudResourceSummary]:
         config = self._config_for(region)
         client = oci.database.DatabaseClient(config)
+
+        @_oci_retry
+        def _list_db_systems():
+            return client.list_db_systems(self._compartment_id())
+
         try:
-            response = client.list_db_systems(self._compartment_id())
+            response = _list_db_systems()
         except ServiceError as exc:
             raise ValidationAppError(
                 f"OCI rejected the database-inventory request ({exc.code}): {exc.message}",
@@ -285,9 +322,14 @@ class OciCloudProviderClient(CloudProviderClient):
     def list_storage(self, region: str) -> list[CloudResourceSummary]:
         config = self._config_for(region)
         client = oci.object_storage.ObjectStorageClient(config)
-        try:
+
+        @_oci_retry
+        def _list_buckets():
             namespace = client.get_namespace().data
-            response = client.list_buckets(namespace, self._compartment_id())
+            return client.list_buckets(namespace, self._compartment_id())
+
+        try:
+            response = _list_buckets()
         except ServiceError as exc:
             raise ValidationAppError(
                 f"OCI rejected the storage-inventory request ({exc.code}): {exc.message}",
@@ -309,8 +351,13 @@ class OciCloudProviderClient(CloudProviderClient):
     def list_networking(self, region: str) -> list[CloudResourceSummary]:
         config = self._config_for(region)
         client = oci.core.VirtualNetworkClient(config)
+
+        @_oci_retry
+        def _list_vcns():
+            return client.list_vcns(self._compartment_id())
+
         try:
-            response = client.list_vcns(self._compartment_id())
+            response = _list_vcns()
         except ServiceError as exc:
             raise ValidationAppError(
                 f"OCI rejected the networking-inventory request ({exc.code}): {exc.message}",

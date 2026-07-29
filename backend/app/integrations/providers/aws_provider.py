@@ -80,6 +80,42 @@ _aws_retry = tenacity.retry(
     reraise=True,
 )
 
+# Phase 25E: a richer error taxonomy for region discovery specifically -
+# every category below is a real distinction AWS's own Error.Code exposes
+# (never a fabricated guess). Resource-inventory/deploy/destroy paths keep
+# their existing single code-per-operation (e.g. AWS_DEPLOY_FAILED) since
+# that already identifies which operation failed; region discovery is the
+# one path this platform calls most often (every account, every TTL cycle)
+# and so is worth the extra classification detail.
+_AWS_CREDENTIALS_EXPIRED_CODES = {"ExpiredToken", "ExpiredTokenException", "RequestExpired"}
+_AWS_CREDENTIALS_REJECTED_CODES = {"AuthFailure", "SignatureDoesNotMatch", "InvalidClientTokenId"}
+_AWS_ACCESS_DENIED_CODES = {"UnauthorizedOperation", "AccessDenied", "AccessDeniedException"}
+_AWS_THROTTLING_CODES = {"Throttling", "ThrottlingException", "RequestLimitExceeded", "TooManyRequestsException"}
+_AWS_OUTAGE_CODES = {"ServiceUnavailable", "InternalError"}
+
+
+def _classify_aws_region_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, botocore.exceptions.ClientError):
+        error_code = exc.response.get("Error", {}).get("Code", "Unknown")
+        message = exc.response.get("Error", {}).get("Message", str(exc))
+        if error_code in _AWS_CREDENTIALS_EXPIRED_CODES:
+            return "AWS_REGION_CREDENTIALS_EXPIRED", f"AWS credentials have expired: {message}"
+        if error_code in _AWS_CREDENTIALS_REJECTED_CODES:
+            return "AWS_REGION_CREDENTIALS_REJECTED", f"AWS rejected the credentials: {message}"
+        if error_code in _AWS_ACCESS_DENIED_CODES:
+            return "AWS_REGION_ACCESS_DENIED", f"AWS denied access to the region-discovery request: {message}"
+        if error_code in _AWS_THROTTLING_CODES:
+            return (
+                "AWS_REGION_THROTTLED",
+                f"AWS throttled the region-discovery request even after retries: {message}",
+            )
+        if error_code in _AWS_OUTAGE_CODES:
+            return "AWS_REGION_PROVIDER_OUTAGE", f"AWS reported a service outage: {message}"
+        return "AWS_REGION_DISCOVERY_FAILED", f"AWS rejected the region-discovery request ({error_code}): {message}"
+    if isinstance(exc, (botocore.exceptions.ConnectTimeoutError, botocore.exceptions.ReadTimeoutError)):
+        return "AWS_REGION_TIMEOUT", f"Timed out reaching AWS to discover regions: {exc}"
+    return "AWS_REGION_NETWORK_UNREACHABLE", f"Could not reach AWS to discover regions: {exc}"
+
 
 class AwsCloudProviderClient(CloudProviderClient):
     @property
@@ -119,25 +155,24 @@ class AwsCloudProviderClient(CloudProviderClient):
 
         try:
             response = _describe_regions()
-        except botocore.exceptions.ClientError as exc:
-            error_code = exc.response.get("Error", {}).get("Code", "Unknown")
-            raise ValidationAppError(
-                f"AWS rejected the region-discovery request ({error_code}): "
-                f"{exc.response.get('Error', {}).get('Message', str(exc))}",
-                code="AWS_REGION_DISCOVERY_FAILED",
-            ) from exc
-        except botocore.exceptions.BotoCoreError as exc:
-            raise ValidationAppError(
-                f"Could not reach AWS to discover regions: {exc}", code="AWS_REGION_DISCOVERY_FAILED"
-            ) from exc
+        except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError) as exc:
+            code, message = _classify_aws_region_error(exc)
+            raise ValidationAppError(message, code=code) from exc
 
-        return [
+        regions = [
             {
                 "id": entry["RegionName"],
                 "display_name": _AWS_REGION_DISPLAY_NAMES.get(entry["RegionName"], entry["RegionName"]),
             }
             for entry in response.get("Regions", [])
         ]
+        if not regions:
+            raise ValidationAppError(
+                "AWS returned zero regions for this account - unexpected for a working AWS account, "
+                "and treated as a failure rather than a legitimately empty result",
+                code="AWS_REGION_NO_REGIONS_RETURNED",
+            )
+        return regions
 
     def list_projects(self) -> list[str]:
         client = boto3.client("sts", **self._client_kwargs())
@@ -179,10 +214,14 @@ class AwsCloudProviderClient(CloudProviderClient):
 
     def list_resources(self, region: str) -> list[CloudResourceSummary]:
         client = boto3.client("ec2", **self._client_kwargs_for(region))
+
+        @_aws_retry
+        def _describe_instances() -> list[dict]:
+            return list(client.get_paginator("describe_instances").paginate())
+
         try:
-            paginator = client.get_paginator("describe_instances")
             results: list[CloudResourceSummary] = []
-            for page in paginator.paginate():
+            for page in _describe_instances():
                 for reservation in page.get("Reservations", []):
                     for instance in reservation.get("Instances", []):
                         name = next(
@@ -205,11 +244,20 @@ class AwsCloudProviderClient(CloudProviderClient):
 
     def list_clusters(self, region: str) -> list[CloudResourceSummary]:
         client = boto3.client("eks", **self._client_kwargs_for(region))
+
+        @_aws_retry
+        def _list_cluster_names() -> list[str]:
+            return client.list_clusters().get("clusters", [])
+
+        @_aws_retry
+        def _describe_cluster(name: str) -> dict:
+            return client.describe_cluster(name=name)["cluster"]
+
         try:
-            cluster_names = client.list_clusters().get("clusters", [])
+            cluster_names = _list_cluster_names()
             results: list[CloudResourceSummary] = []
             for name in cluster_names:
-                detail = client.describe_cluster(name=name)["cluster"]
+                detail = _describe_cluster(name)
                 results.append(
                     {
                         "id": detail.get("arn", name),
@@ -226,10 +274,14 @@ class AwsCloudProviderClient(CloudProviderClient):
 
     def list_databases(self, region: str) -> list[CloudResourceSummary]:
         client = boto3.client("rds", **self._client_kwargs_for(region))
+
+        @_aws_retry
+        def _describe_db_instances() -> list[dict]:
+            return list(client.get_paginator("describe_db_instances").paginate())
+
         try:
-            paginator = client.get_paginator("describe_db_instances")
             results: list[CloudResourceSummary] = []
-            for page in paginator.paginate():
+            for page in _describe_db_instances():
                 for db in page.get("DBInstances", []):
                     results.append(
                         {
@@ -254,8 +306,13 @@ class AwsCloudProviderClient(CloudProviderClient):
         # region was requested, disclosed honestly rather than silently
         # pretending buckets are partitioned by region.
         client = boto3.client("s3", **self._client_kwargs_for(region))
+
+        @_aws_retry
+        def _list_buckets() -> list[dict]:
+            return client.list_buckets().get("Buckets", [])
+
         try:
-            buckets = client.list_buckets().get("Buckets", [])
+            buckets = _list_buckets()
             return [
                 {
                     "id": bucket["Name"],
@@ -272,10 +329,14 @@ class AwsCloudProviderClient(CloudProviderClient):
 
     def list_networking(self, region: str) -> list[CloudResourceSummary]:
         client = boto3.client("ec2", **self._client_kwargs_for(region))
+
+        @_aws_retry
+        def _describe_vpcs() -> list[dict]:
+            return list(client.get_paginator("describe_vpcs").paginate())
+
         try:
-            paginator = client.get_paginator("describe_vpcs")
             results: list[CloudResourceSummary] = []
-            for page in paginator.paginate():
+            for page in _describe_vpcs():
                 for vpc in page.get("Vpcs", []):
                     name = next(
                         (t["Value"] for t in vpc.get("Tags", []) if t.get("Key") == "Name"), vpc["VpcId"]

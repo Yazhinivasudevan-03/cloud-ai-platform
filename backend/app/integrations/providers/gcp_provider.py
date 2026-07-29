@@ -15,7 +15,9 @@ from google.api_core.exceptions import (
     DeadlineExceeded,
     GoogleAPICallError,
     PermissionDenied,
+    ResourceExhausted,
     ServiceUnavailable,
+    TooManyRequests,
     Unauthenticated,
 )
 from google.cloud import compute_v1, container_v1, storage
@@ -59,7 +61,15 @@ _GCP_REGION_DISPLAY_NAMES = {
 
 
 def _is_retryable_gcp_error(exc: BaseException) -> bool:
-    return isinstance(exc, (ServiceUnavailable, DeadlineExceeded))
+    if isinstance(exc, (ServiceUnavailable, DeadlineExceeded, TooManyRequests, ResourceExhausted)):
+        return True
+    # Cloud SQL (list_databases) goes through the generic googleapiclient
+    # discovery client, not google-cloud-*, so it raises HttpError rather
+    # than a google.api_core.exceptions subclass - same transient-status
+    # codes, different exception type.
+    if isinstance(exc, HttpError):
+        return exc.resp.status in (429, 500, 503)
+    return False
 
 
 _gcp_retry = tenacity.retry(
@@ -68,6 +78,23 @@ _gcp_retry = tenacity.retry(
     wait=tenacity.wait_exponential(multiplier=1, min=1, max=8),
     reraise=True,
 )
+
+
+# Phase 25E: region-discovery error taxonomy (see aws_provider.py's
+# identical rationale) - every category below is a real, distinct
+# google.api_core.exceptions class GCP's own client library already raises.
+def _classify_gcp_region_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, Unauthenticated):
+        return "GCP_REGION_CREDENTIALS_REJECTED", f"GCP rejected the credentials: {exc}"
+    if isinstance(exc, PermissionDenied):
+        return "GCP_REGION_ACCESS_DENIED", f"GCP denied access to the region-discovery request: {exc}"
+    if isinstance(exc, (TooManyRequests, ResourceExhausted)):
+        return "GCP_REGION_THROTTLED", f"GCP throttled the region-discovery request even after retries: {exc}"
+    if isinstance(exc, ServiceUnavailable):
+        return "GCP_REGION_PROVIDER_OUTAGE", f"GCP reported a service outage: {exc}"
+    if isinstance(exc, DeadlineExceeded):
+        return "GCP_REGION_TIMEOUT", f"Timed out reaching GCP to discover regions: {exc}"
+    return "GCP_REGION_DISCOVERY_FAILED", f"GCP rejected the region-discovery request: {exc}"
 
 
 class GcpCloudProviderClient(CloudProviderClient):
@@ -113,19 +140,21 @@ class GcpCloudProviderClient(CloudProviderClient):
 
         try:
             regions = _list_regions()
-        except (PermissionDenied, Unauthenticated) as exc:
-            raise ValidationAppError(
-                f"GCP rejected the credentials: {exc}", code="GCP_REGION_DISCOVERY_FAILED"
-            ) from exc
         except GoogleAPICallError as exc:
-            raise ValidationAppError(
-                f"GCP rejected the region-discovery request: {exc}", code="GCP_REGION_DISCOVERY_FAILED"
-            ) from exc
+            code, message = _classify_gcp_region_error(exc)
+            raise ValidationAppError(message, code=code) from exc
 
-        return [
+        results = [
             {"id": region.name, "display_name": _GCP_REGION_DISPLAY_NAMES.get(region.name, region.name)}
             for region in regions
         ]
+        if not results:
+            raise ValidationAppError(
+                "GCP returned zero regions for this project - unexpected for a working project, "
+                "and treated as a failure rather than a legitimately empty result",
+                code="GCP_REGION_NO_REGIONS_RETURNED",
+            )
+        return results
 
     def list_projects(self) -> list[str]:
         _, project_id = self._load_credentials()
@@ -137,12 +166,17 @@ class GcpCloudProviderClient(CloudProviderClient):
     def list_resources(self, region: str) -> list[CloudResourceSummary]:
         google_credentials, project_id = self._load_credentials()
         client = compute_v1.InstancesClient(credentials=google_credentials)
-        try:
+
+        @_gcp_retry
+        def _aggregated_list():
             # Compute Engine instances are zone-scoped (e.g. "us-central1-a"),
             # not region-scoped - aggregated_list() is the real API's own
             # way of listing across every zone, filtered here to the zones
             # that belong to the requested region.
-            aggregated = client.aggregated_list(project=project_id)
+            return list(client.aggregated_list(project=project_id))
+
+        try:
+            aggregated = _aggregated_list()
             results: list[CloudResourceSummary] = []
             for zone, scoped_list in aggregated:
                 zone_name = zone.split("/")[-1]
@@ -172,8 +206,13 @@ class GcpCloudProviderClient(CloudProviderClient):
     def list_clusters(self, region: str) -> list[CloudResourceSummary]:
         google_credentials, project_id = self._load_credentials()
         client = container_v1.ClusterManagerClient(credentials=google_credentials)
+
+        @_gcp_retry
+        def _list_clusters():
+            return client.list_clusters(parent=f"projects/{project_id}/locations/-")
+
         try:
-            response = client.list_clusters(parent=f"projects/{project_id}/locations/-")
+            response = _list_clusters()
             return [
                 {
                     "id": cluster.name,
@@ -201,9 +240,14 @@ class GcpCloudProviderClient(CloudProviderClient):
         # discovery-based sqladmin API, same as GCP's own gcloud CLI uses
         # under the hood.
         google_credentials, project_id = self._load_credentials()
-        try:
+
+        @_gcp_retry
+        def _list_instances():
             service = build_google_api_client("sqladmin", "v1beta4", credentials=google_credentials)
-            response = service.instances().list(project=project_id).execute()
+            return service.instances().list(project=project_id).execute()
+
+        try:
+            response = _list_instances()
             return [
                 {
                     "id": instance["name"],
@@ -223,9 +267,14 @@ class GcpCloudProviderClient(CloudProviderClient):
 
     def list_storage(self, region: str) -> list[CloudResourceSummary]:
         google_credentials, project_id = self._load_credentials()
-        try:
+
+        @_gcp_retry
+        def _list_buckets():
             client = storage.Client(credentials=google_credentials, project=project_id)
-            buckets = list(client.list_buckets())
+            return list(client.list_buckets())
+
+        try:
+            buckets = _list_buckets()
             return [
                 {
                     "id": bucket.name,
@@ -251,8 +300,13 @@ class GcpCloudProviderClient(CloudProviderClient):
         # S3 disclosure).
         google_credentials, project_id = self._load_credentials()
         client = compute_v1.NetworksClient(credentials=google_credentials)
+
+        @_gcp_retry
+        def _list_networks():
+            return list(client.list(project=project_id))
+
         try:
-            networks = list(client.list(project=project_id))
+            networks = _list_networks()
             return [
                 {
                     "id": str(network.id),

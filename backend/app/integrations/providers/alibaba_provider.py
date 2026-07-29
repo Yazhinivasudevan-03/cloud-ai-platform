@@ -78,6 +78,10 @@ def _is_retryable_alibaba_error(exc: BaseException) -> bool:
     if isinstance(exc, TeaException):
         code = str(getattr(exc, "code", ""))
         return code in ("Throttling", "ServiceUnavailable", "InternalError")
+    # OSS (list_storage/deploy_storage) goes through oss2, not the Tea-based
+    # clients - same transient-status codes, different exception type.
+    if isinstance(exc, oss2.exceptions.OssError):
+        return exc.status in (429, 500, 503)
     return False
 
 
@@ -87,6 +91,41 @@ _alibaba_retry = tenacity.retry(
     wait=tenacity.wait_exponential(multiplier=1, min=1, max=8),
     reraise=True,
 )
+
+_ALIBABA_CREDENTIALS_CODES = {
+    "InvalidAccessKeyId.NotFound",
+    "IncompleteSignature",
+    "SignatureDoesNotMatch",
+    "InvalidSecurityToken.Expired",
+}
+_ALIBABA_ACCESS_DENIED_CODES = {"Forbidden.RAM", "NoPermission", "Forbidden"}
+_ALIBABA_OUTAGE_CODES = {"ServiceUnavailable", "InternalError"}
+
+
+# Phase 25E: region-discovery error taxonomy (see aws_provider.py's
+# identical rationale) - Alibaba's TeaException.code is a real Alibaba
+# Cloud API error code (e.g. "Throttling", "Forbidden.RAM"), so these
+# categories read directly from it rather than guessing.
+def _classify_alibaba_region_error(exc: TeaException) -> tuple[str, str]:
+    error_code = str(getattr(exc, "code", ""))
+    message = str(getattr(exc, "message", exc))
+    if error_code == "InvalidSecurityToken.Expired":
+        return "ALIBABA_REGION_CREDENTIALS_EXPIRED", f"Alibaba Cloud credentials have expired: {message}"
+    if error_code in _ALIBABA_CREDENTIALS_CODES:
+        return "ALIBABA_REGION_CREDENTIALS_REJECTED", f"Alibaba Cloud rejected the credentials: {message}"
+    if error_code in _ALIBABA_ACCESS_DENIED_CODES:
+        return "ALIBABA_REGION_ACCESS_DENIED", f"Alibaba Cloud denied access to the region-discovery request: {message}"
+    if error_code == "Throttling":
+        return (
+            "ALIBABA_REGION_THROTTLED",
+            f"Alibaba Cloud throttled the region-discovery request even after retries: {message}",
+        )
+    if error_code in _ALIBABA_OUTAGE_CODES:
+        return "ALIBABA_REGION_PROVIDER_OUTAGE", f"Alibaba Cloud reported a service outage: {message}"
+    return (
+        "ALIBABA_REGION_DISCOVERY_FAILED",
+        f"Alibaba Cloud rejected the region-discovery request ({error_code}): {message}",
+    )
 
 
 class AlibabaCloudProviderClient(CloudProviderClient):
@@ -158,13 +197,18 @@ class AlibabaCloudProviderClient(CloudProviderClient):
         try:
             response = _describe_regions()
         except TeaException as exc:
-            raise ValidationAppError(
-                f"Alibaba Cloud rejected the region-discovery request ({exc.code}): {exc.message}",
-                code="ALIBABA_REGION_DISCOVERY_FAILED",
-            ) from exc
+            code, message = _classify_alibaba_region_error(exc)
+            raise ValidationAppError(message, code=code) from exc
 
         regions = response.body.regions.region or []
-        return [{"id": r.region_id, "display_name": r.local_name or r.region_id} for r in regions]
+        results = [{"id": r.region_id, "display_name": r.local_name or r.region_id} for r in regions]
+        if not results:
+            raise ValidationAppError(
+                "Alibaba Cloud returned zero regions for this account - unexpected for a working "
+                "account, and treated as a failure rather than a legitimately empty result",
+                code="ALIBABA_REGION_NO_REGIONS_RETURNED",
+            )
+        return results
 
     def list_monitoring(self, resource_id: str, lookback_minutes: int) -> InstanceResourceUsage:
         client = self._cms_client()
@@ -230,8 +274,13 @@ class AlibabaCloudProviderClient(CloudProviderClient):
     def list_resources(self, region: str) -> list[CloudResourceSummary]:
         client = self._ecs_client_for(region)
         request = ecs_models.DescribeInstancesRequest(region_id=region)
+
+        @_alibaba_retry
+        def _describe_instances():
+            return client.describe_instances(request)
+
         try:
-            response = client.describe_instances(request)
+            response = _describe_instances()
         except TeaException as exc:
             raise self._wrap_tea_exception(exc, "ALIBABA_RESOURCE_INVENTORY_FAILED") from exc
 
@@ -253,8 +302,13 @@ class AlibabaCloudProviderClient(CloudProviderClient):
         config.endpoint = f"cs.{region}.aliyuncs.com"
         client = CsClient(config)
         request = cs_models.DescribeClustersV1Request(region_id=region)
+
+        @_alibaba_retry
+        def _describe_clusters():
+            return client.describe_clusters_v1(request)
+
         try:
-            response = client.describe_clusters_v1(request)
+            response = _describe_clusters()
         except TeaException as exc:
             raise self._wrap_tea_exception(exc, "ALIBABA_CLUSTER_INVENTORY_FAILED") from exc
 
@@ -276,8 +330,13 @@ class AlibabaCloudProviderClient(CloudProviderClient):
         config.endpoint = f"rds.{region}.aliyuncs.com"
         client = RdsClient(config)
         request = rds_models.DescribeDBInstancesRequest(region_id=region)
+
+        @_alibaba_retry
+        def _describe_dbinstances():
+            return client.describe_dbinstances(request)
+
         try:
-            response = client.describe_dbinstances(request)
+            response = _describe_dbinstances()
         except TeaException as exc:
             raise self._wrap_tea_exception(exc, "ALIBABA_DATABASE_INVENTORY_FAILED") from exc
 
@@ -298,9 +357,13 @@ class AlibabaCloudProviderClient(CloudProviderClient):
         self.authenticate()
         auth = oss2.Auth(self.credentials["access_key_id"], self.credentials["access_key_secret"])
         endpoint = f"https://oss-{region}.aliyuncs.com"
+
+        @_alibaba_retry
+        def _list_buckets():
+            return oss2.Service(auth, endpoint).list_buckets()
+
         try:
-            service = oss2.Service(auth, endpoint)
-            result = service.list_buckets()
+            result = _list_buckets()
         except oss2.exceptions.OssError as exc:
             raise ValidationAppError(
                 f"Alibaba OSS rejected the storage-inventory request: {exc}",
@@ -324,8 +387,13 @@ class AlibabaCloudProviderClient(CloudProviderClient):
         config.endpoint = f"vpc.{region}.aliyuncs.com"
         client = VpcClient(config)
         request = vpc_models.DescribeVpcsRequest(region_id=region)
+
+        @_alibaba_retry
+        def _describe_vpcs():
+            return client.describe_vpcs(request)
+
         try:
-            response = client.describe_vpcs(request)
+            response = _describe_vpcs()
         except TeaException as exc:
             raise self._wrap_tea_exception(exc, "ALIBABA_NETWORKING_INVENTORY_FAILED") from exc
 
