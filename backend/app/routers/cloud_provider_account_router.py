@@ -32,7 +32,12 @@ from app.schemas.cloud_provider_account import (
     CloudProviderAccountUpdate,
 )
 from app.schemas.cloud_region import CloudAccountRegionsRead, SelectRegionRequest
-from app.schemas.cloud_resource import CloudResourceListRead
+from app.schemas.cloud_resource import (
+    CloudResourceListRead,
+    CloudResourceRead,
+    DeployResourceRequest,
+    DestroyResourceRequest,
+)
 from app.schemas.common import ErrorResponse, PaginatedResponse
 
 router = APIRouter(prefix="/cloud-provider-accounts", tags=["Cloud Provider Accounts"])
@@ -371,3 +376,62 @@ def list_cloud_provider_account_resources(
     current_user: User = Depends(get_current_active_user),
 ) -> CloudResourceListRead:
     return CloudProviderAccountController(db).list_inventory(account_id, current_user.id, category, region)
+
+
+@router.post(
+    "/{account_id}/resources/deploy",
+    response_model=CloudResourceRead,
+    status_code=201,
+    summary=(
+        "Provision a real compute instance/storage bucket/network on one of the current user's own "
+        "cloud provider accounts (Phase 25D) - this creates genuine infrastructure if pointed at "
+        "real credentials. Every attempt is recorded in the audit log"
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+        422: {
+            "model": ErrorResponse,
+            "description": "Invalid resource type, an incomplete spec, or the provider rejected the request",
+        },
+    },
+)
+def deploy_cloud_provider_account_resource(
+    account_id: int,
+    payload: DeployResourceRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CloudResourceRead:
+    return CloudProviderAccountController(db).deploy_resource(
+        account_id, current_user.id, payload.resource_type, payload.region, payload.spec
+    )
+
+
+@router.delete(
+    "/{account_id}/resources/{resource_type}/{resource_id}",
+    status_code=204,
+    summary=(
+        "Permanently destroy a real resource on one of the current user's own cloud provider "
+        "accounts (Phase 25D) - THIS CANNOT BE UNDONE. Requires 'confirm' to exactly match "
+        "resource_id. Every attempt is recorded in the audit log"
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+        422: {
+            "model": ErrorResponse,
+            "description": "Invalid resource type, confirmation mismatch, or the provider rejected the request",
+        },
+    },
+)
+def destroy_cloud_provider_account_resource(
+    account_id: int,
+    resource_type: str,
+    resource_id: str,
+    payload: DestroyResourceRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> None:
+    CloudProviderAccountController(db).destroy_resource(
+        account_id, current_user.id, resource_type, resource_id, payload.region, payload.confirm
+    )

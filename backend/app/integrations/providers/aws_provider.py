@@ -49,6 +49,13 @@ _AWS_REGION_DISPLAY_NAMES = {
     "sa-east-1": "South America (Sao Paulo)",
 }
 
+# The one, fixed, smallest/free-tier-eligible instance size deploy() will
+# ever request - not user-configurable in this pass, to bound real-world
+# cost/blast-radius risk from the very first release of provisioning
+# (Phase 25D). Users pick their own size once real production usage
+# justifies extending this beyond a fixed minimum.
+_DEPLOY_INSTANCE_TYPE = "t3.micro"
+
 _RETRYABLE_CLIENT_ERROR_CODES = {
     "Throttling",
     "ThrottlingException",
@@ -286,3 +293,118 @@ class AwsCloudProviderClient(CloudProviderClient):
             return results
         except botocore.exceptions.ClientError as exc:
             raise self._wrap_client_error(exc, "AWS_NETWORKING_INVENTORY_FAILED") from exc
+
+    def deploy(self, region: str, resource_type: str, spec: dict) -> CloudResourceSummary:
+        if resource_type == "compute":
+            return self._deploy_compute(region, spec)
+        if resource_type == "storage":
+            return self._deploy_storage(region, spec)
+        if resource_type == "networking":
+            return self._deploy_networking(region, spec)
+        raise self._not_yet_supported(f"Provisioning of '{resource_type}'")
+
+    def destroy(self, region: str, resource_type: str, resource_id: str) -> None:
+        if resource_type == "compute":
+            return self._destroy_compute(region, resource_id)
+        if resource_type == "storage":
+            return self._destroy_storage(region, resource_id)
+        if resource_type == "networking":
+            return self._destroy_networking(region, resource_id)
+        raise self._not_yet_supported(f"Provisioning of '{resource_type}'")
+
+    def _deploy_compute(self, region: str, spec: dict) -> CloudResourceSummary:
+        image_id = spec.get("image_id")
+        if not image_id:
+            raise ValidationAppError(
+                "AWS compute deploy requires spec.image_id (an AMI ID valid in the target region)",
+                code="AWS_DEPLOY_SPEC_INCOMPLETE",
+            )
+        client = boto3.client("ec2", **self._client_kwargs_for(region))
+        name = spec.get("name", "cloud-ai-platform-instance")
+        try:
+            response = client.run_instances(
+                ImageId=image_id,
+                InstanceType=_DEPLOY_INSTANCE_TYPE,
+                MinCount=1,
+                MaxCount=1,
+                TagSpecifications=[{"ResourceType": "instance", "Tags": [{"Key": "Name", "Value": name}]}],
+            )
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_DEPLOY_FAILED") from exc
+
+        instance = response["Instances"][0]
+        return {
+            "id": instance["InstanceId"],
+            "name": name,
+            "type": _DEPLOY_INSTANCE_TYPE,
+            "region": region,
+            "status": instance.get("State", {}).get("Name", "unknown"),
+            "created_at": instance.get("LaunchTime"),
+        }
+
+    def _destroy_compute(self, region: str, resource_id: str) -> None:
+        client = boto3.client("ec2", **self._client_kwargs_for(region))
+        try:
+            client.terminate_instances(InstanceIds=[resource_id])
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_DESTROY_FAILED") from exc
+
+    def _deploy_storage(self, region: str, spec: dict) -> CloudResourceSummary:
+        name = spec.get("name")
+        if not name:
+            raise ValidationAppError(
+                "AWS storage deploy requires spec.name (a globally-unique S3 bucket name)",
+                code="AWS_DEPLOY_SPEC_INCOMPLETE",
+            )
+        client = boto3.client("s3", **self._client_kwargs_for(region))
+        kwargs: dict = {"Bucket": name}
+        # us-east-1 is the one region where CreateBucketConfiguration must
+        # be omitted entirely - passing it (even with the "correct" region)
+        # is rejected by the real S3 API as an invalid location constraint.
+        if region != "us-east-1":
+            kwargs["CreateBucketConfiguration"] = {"LocationConstraint": region}
+        try:
+            client.create_bucket(**kwargs)
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_DEPLOY_FAILED") from exc
+
+        return {"id": name, "name": name, "type": "s3_bucket", "region": region, "status": "available", "created_at": None}
+
+    def _destroy_storage(self, region: str, resource_id: str) -> None:
+        client = boto3.client("s3", **self._client_kwargs_for(region))
+        try:
+            # delete_bucket requires an already-empty bucket - a real,
+            # deliberate AWS safety precondition this platform does not
+            # attempt to bypass by force-emptying it first.
+            client.delete_bucket(Bucket=resource_id)
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_DESTROY_FAILED") from exc
+
+    def _deploy_networking(self, region: str, spec: dict) -> CloudResourceSummary:
+        cidr_block = spec.get("cidr_block", "10.0.0.0/16")
+        client = boto3.client("ec2", **self._client_kwargs_for(region))
+        name = spec.get("name", "cloud-ai-platform-vpc")
+        try:
+            response = client.create_vpc(
+                CidrBlock=cidr_block,
+                TagSpecifications=[{"ResourceType": "vpc", "Tags": [{"Key": "Name", "Value": name}]}],
+            )
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_DEPLOY_FAILED") from exc
+
+        vpc = response["Vpc"]
+        return {
+            "id": vpc["VpcId"],
+            "name": name,
+            "type": "vpc",
+            "region": region,
+            "status": vpc.get("State", "unknown"),
+            "created_at": None,
+        }
+
+    def _destroy_networking(self, region: str, resource_id: str) -> None:
+        client = boto3.client("ec2", **self._client_kwargs_for(region))
+        try:
+            client.delete_vpc(VpcId=resource_id)
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_DESTROY_FAILED") from exc

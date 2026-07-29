@@ -12,10 +12,11 @@ from app.schemas.cloud_provider_account import (
     CloudProviderAccountUpdate,
 )
 from app.schemas.cloud_region import CloudAccountRegionsRead
-from app.schemas.cloud_resource import CloudResourceListRead
+from app.schemas.cloud_resource import CloudResourceListRead, CloudResourceRead
 from app.schemas.common import PaginatedResponse, PaginationMeta
 from app.schemas.resource_usage import ResourceUsageRead
 from app.services.cloud_provider_account_service import CloudProviderAccountService
+from app.services.cloud_provisioning_service import CloudProvisioningService
 from app.services.cloud_region_sync_service import CloudRegionSyncService, load_available_regions
 from app.services.cloud_resource_inventory_service import CloudResourceInventoryService
 
@@ -35,6 +36,7 @@ class CloudProviderAccountController:
         self.service = CloudProviderAccountService(db)
         self.region_sync_service = CloudRegionSyncService(db)
         self.resource_inventory_service = CloudResourceInventoryService(db)
+        self.provisioning_service = CloudProvisioningService(db)
 
     def create(self, user_id: int, payload: CloudProviderAccountCreate) -> CloudProviderAccountRead:
         return CloudProviderAccountRead.model_validate(self.service.create(user_id, payload))
@@ -114,3 +116,22 @@ class CloudProviderAccountController:
     ) -> CloudResourceListRead:
         items = self.resource_inventory_service.list_resources(account_id, current_user_id, category, region)
         return CloudResourceListRead(category=category, region=region, items=list(items))
+
+    def deploy_resource(
+        self, account_id: int, current_user_id: int, resource_type: str, region: str, spec: dict
+    ) -> CloudResourceRead:
+        result = self.provisioning_service.deploy(account_id, current_user_id, resource_type, region, spec)
+        return CloudResourceRead(**result)
+
+    def destroy_resource(
+        self,
+        account_id: int,
+        current_user_id: int,
+        resource_type: str,
+        resource_id: str,
+        region: str,
+        confirm: str,
+    ) -> None:
+        self.provisioning_service.destroy(
+            account_id, current_user_id, resource_type, resource_id, region, confirm
+        )

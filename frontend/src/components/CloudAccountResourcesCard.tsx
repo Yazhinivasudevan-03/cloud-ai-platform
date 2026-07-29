@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Button,
   CircularProgress,
+  IconButton,
   MenuItem,
   Paper,
   Stack,
@@ -16,11 +18,26 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
+import DeleteIcon from "@mui/icons-material/DeleteOutline";
+import { DeployResourceDialog } from "@/components/DeployResourceDialog";
+import { DestroyResourceDialog } from "@/components/DestroyResourceDialog";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { StatusChip } from "@/components/StatusChip";
 import { cloudProviderAccountsApi } from "@/services/cloudProviderAccountsApi";
 import { formatDateTime } from "@/utils/formatters";
-import { ALL_REGIONS_SENTINEL, RESOURCE_CATEGORIES, type ResourceCategory } from "@/types";
+import {
+  ALL_REGIONS_SENTINEL,
+  PROVISIONABLE_RESOURCE_TYPES,
+  RESOURCE_CATEGORIES,
+  type CloudResource,
+  type ProvisionableResourceType,
+  type ResourceCategory,
+} from "@/types";
+
+function isProvisionable(category: ResourceCategory): category is ProvisionableResourceType {
+  return (PROVISIONABLE_RESOURCE_TYPES as readonly string[]).includes(category);
+}
 
 const CATEGORY_LABELS: Record<ResourceCategory, string> = {
   compute: "Compute",
@@ -32,6 +49,8 @@ const CATEGORY_LABELS: Record<ResourceCategory, string> = {
 
 export function CloudAccountResourcesCard({ accountId }: { accountId: number }) {
   const [category, setCategory] = useState<ResourceCategory>("compute");
+  const [deployDialogOpen, setDeployDialogOpen] = useState(false);
+  const [destroyingResource, setDestroyingResource] = useState<CloudResource | null>(null);
 
   const regionsQuery = useQuery({
     queryKey: ["cloud-provider-accounts", accountId, "regions"],
@@ -46,25 +65,41 @@ export function CloudAccountResourcesCard({ accountId }: { accountId: number }) 
     enabled: !!regionsQuery.data,
   });
 
+  const availableRegions = regionsQuery.data?.regions ?? [];
+  const categoryIsProvisionable = isProvisionable(category);
+
   return (
     <Paper sx={{ p: 2.5 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" spacing={1} sx={{ mb: 1 }}>
         <Typography variant="h6">Resources</Typography>
-        <TextField
-          select
-          size="small"
-          label="Region"
-          value={effectiveRegion}
-          onChange={(e) => setRegion(e.target.value)}
-          sx={{ minWidth: 220 }}
-        >
-          <MenuItem value={ALL_REGIONS_SENTINEL}>All Regions (aggregate)</MenuItem>
-          {(regionsQuery.data?.regions ?? []).map((r) => (
-            <MenuItem key={r.id} value={r.id}>
-              {r.display_name}
-            </MenuItem>
-          ))}
-        </TextField>
+        <Stack direction="row" spacing={1} alignItems="center">
+          {categoryIsProvisionable && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<AddIcon />}
+              disabled={availableRegions.length === 0}
+              onClick={() => setDeployDialogOpen(true)}
+            >
+              Deploy resource
+            </Button>
+          )}
+          <TextField
+            select
+            size="small"
+            label="Region"
+            value={effectiveRegion}
+            onChange={(e) => setRegion(e.target.value)}
+            sx={{ minWidth: 220 }}
+          >
+            <MenuItem value={ALL_REGIONS_SENTINEL}>All Regions (aggregate)</MenuItem>
+            {availableRegions.map((r) => (
+              <MenuItem key={r.id} value={r.id}>
+                {r.display_name}
+              </MenuItem>
+            ))}
+          </TextField>
+        </Stack>
       </Stack>
 
       <Tabs
@@ -107,6 +142,7 @@ export function CloudAccountResourcesCard({ accountId }: { accountId: number }) 
                 <TableCell>Region</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>Created</TableCell>
+                {categoryIsProvisionable && <TableCell align="right">Actions</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -119,11 +155,40 @@ export function CloudAccountResourcesCard({ accountId }: { accountId: number }) 
                     <StatusChip value={item.status} />
                   </TableCell>
                   <TableCell>{item.created_at ? formatDateTime(item.created_at) : "-"}</TableCell>
+                  {categoryIsProvisionable && (
+                    <TableCell align="right">
+                      <IconButton size="small" aria-label="Destroy resource" onClick={() => setDestroyingResource(item)}>
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </TableContainer>
+      )}
+
+      {categoryIsProvisionable && (
+        <DeployResourceDialog
+          open={deployDialogOpen}
+          accountId={accountId}
+          regions={availableRegions}
+          defaultRegion={
+            effectiveRegion === ALL_REGIONS_SENTINEL ? availableRegions[0]?.id ?? "" : effectiveRegion
+          }
+          onClose={() => setDeployDialogOpen(false)}
+        />
+      )}
+
+      {categoryIsProvisionable && (
+        <DestroyResourceDialog
+          open={destroyingResource !== null}
+          accountId={accountId}
+          resourceType={category}
+          resource={destroyingResource}
+          onClose={() => setDestroyingResource(null)}
+        />
       )}
     </Paper>
   );

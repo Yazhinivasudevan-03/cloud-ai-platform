@@ -56,6 +56,11 @@ _OCI_REGION_DISPLAY_NAMES = {
 
 _NAMESPACE = "oci_computeagent"
 
+# The one, fixed, smallest/free-tier-eligible shape deploy() will ever
+# request - not user-configurable in this pass (see aws_provider.py's
+# identical _DEPLOY_INSTANCE_TYPE for the same reasoning).
+_DEPLOY_SHAPE = "VM.Standard.E2.1.Micro"
+
 
 class InstanceResourceUsage(TypedDict):
     cpu_usage_percent: float
@@ -323,3 +328,151 @@ class OciCloudProviderClient(CloudProviderClient):
             }
             for vcn in response.data
         ]
+
+    def deploy(self, region: str, resource_type: str, spec: dict) -> CloudResourceSummary:
+        if resource_type == "compute":
+            return self._deploy_compute(region, spec)
+        if resource_type == "storage":
+            return self._deploy_storage(region, spec)
+        if resource_type == "networking":
+            return self._deploy_networking(region, spec)
+        raise self._not_yet_supported(f"Provisioning of '{resource_type}'")
+
+    def destroy(self, region: str, resource_type: str, resource_id: str) -> None:
+        if resource_type == "compute":
+            return self._destroy_compute(region, resource_id)
+        if resource_type == "storage":
+            return self._destroy_storage(region, resource_id)
+        if resource_type == "networking":
+            return self._destroy_networking(region, resource_id)
+        raise self._not_yet_supported(f"Provisioning of '{resource_type}'")
+
+    @staticmethod
+    def _require_spec(spec: dict, keys: tuple[str, ...]) -> None:
+        missing = [k for k in keys if not spec.get(k)]
+        if missing:
+            raise ValidationAppError(
+                f"OCI deploy requires spec.{', spec.'.join(missing)}", code="OCI_DEPLOY_SPEC_INCOMPLETE"
+            )
+
+    def _deploy_compute(self, region: str, spec: dict) -> CloudResourceSummary:
+        # A real OCI compute instance needs an availability domain and a
+        # subnet within the target VCN - both real, standard OCI
+        # prerequisites this platform cannot fabricate on the caller's
+        # behalf (the same honest stance as requiring an AMI id for AWS).
+        self._require_spec(spec, ("image_id", "availability_domain", "subnet_id"))
+        config = self._config_for(region)
+        client = oci.core.ComputeClient(config)
+        name = spec.get("name", "cloud-ai-platform-instance")
+        details = oci.core.models.LaunchInstanceDetails(
+            compartment_id=self._compartment_id(),
+            availability_domain=spec["availability_domain"],
+            shape=_DEPLOY_SHAPE,
+            display_name=name,
+            source_details=oci.core.models.InstanceSourceViaImageDetails(image_id=spec["image_id"]),
+            create_vnic_details=oci.core.models.CreateVnicDetails(subnet_id=spec["subnet_id"]),
+        )
+        try:
+            response = client.launch_instance(details)
+        except ServiceError as exc:
+            raise ValidationAppError(
+                f"OCI rejected the deploy request ({exc.code}): {exc.message}", code="OCI_DEPLOY_FAILED"
+            ) from exc
+
+        instance = response.data
+        return {
+            "id": instance.id,
+            "name": instance.display_name,
+            "type": _DEPLOY_SHAPE,
+            "region": region,
+            "status": instance.lifecycle_state,
+            "created_at": instance.time_created,
+        }
+
+    def _destroy_compute(self, region: str, resource_id: str) -> None:
+        config = self._config_for(region)
+        client = oci.core.ComputeClient(config)
+        try:
+            client.terminate_instance(resource_id)
+        except ServiceError as exc:
+            raise ValidationAppError(
+                f"OCI rejected the destroy request ({exc.code}): {exc.message}", code="OCI_DESTROY_FAILED"
+            ) from exc
+
+    def _deploy_storage(self, region: str, spec: dict) -> CloudResourceSummary:
+        name = spec.get("name")
+        if not name:
+            raise ValidationAppError(
+                "OCI storage deploy requires spec.name (a bucket name, unique per namespace)",
+                code="OCI_DEPLOY_SPEC_INCOMPLETE",
+            )
+        config = self._config_for(region)
+        client = oci.object_storage.ObjectStorageClient(config)
+        try:
+            namespace = client.get_namespace().data
+            details = oci.object_storage.models.CreateBucketDetails(
+                name=name, compartment_id=self._compartment_id()
+            )
+            response = client.create_bucket(namespace, details)
+        except ServiceError as exc:
+            raise ValidationAppError(
+                f"OCI rejected the deploy request ({exc.code}): {exc.message}", code="OCI_DEPLOY_FAILED"
+            ) from exc
+
+        bucket = response.data
+        return {
+            "id": bucket.name,
+            "name": bucket.name,
+            "type": "object_storage_bucket",
+            "region": region,
+            "status": "available",
+            "created_at": bucket.time_created,
+        }
+
+    def _destroy_storage(self, region: str, resource_id: str) -> None:
+        config = self._config_for(region)
+        client = oci.object_storage.ObjectStorageClient(config)
+        try:
+            namespace = client.get_namespace().data
+            # Requires an already-empty bucket - a real OCI precondition
+            # this platform does not attempt to bypass by force-emptying it.
+            client.delete_bucket(namespace, resource_id)
+        except ServiceError as exc:
+            raise ValidationAppError(
+                f"OCI rejected the destroy request ({exc.code}): {exc.message}", code="OCI_DESTROY_FAILED"
+            ) from exc
+
+    def _deploy_networking(self, region: str, spec: dict) -> CloudResourceSummary:
+        cidr_block = spec.get("cidr_block", "10.0.0.0/16")
+        name = spec.get("name", "cloud-ai-platform-vcn")
+        config = self._config_for(region)
+        client = oci.core.VirtualNetworkClient(config)
+        try:
+            details = oci.core.models.CreateVcnDetails(
+                cidr_block=cidr_block, compartment_id=self._compartment_id(), display_name=name
+            )
+            response = client.create_vcn(details)
+        except ServiceError as exc:
+            raise ValidationAppError(
+                f"OCI rejected the deploy request ({exc.code}): {exc.message}", code="OCI_DEPLOY_FAILED"
+            ) from exc
+
+        vcn = response.data
+        return {
+            "id": vcn.id,
+            "name": vcn.display_name,
+            "type": "vcn",
+            "region": region,
+            "status": vcn.lifecycle_state,
+            "created_at": vcn.time_created,
+        }
+
+    def _destroy_networking(self, region: str, resource_id: str) -> None:
+        config = self._config_for(region)
+        client = oci.core.VirtualNetworkClient(config)
+        try:
+            client.delete_vcn(resource_id)
+        except ServiceError as exc:
+            raise ValidationAppError(
+                f"OCI rejected the destroy request ({exc.code}): {exc.message}", code="OCI_DESTROY_FAILED"
+            ) from exc

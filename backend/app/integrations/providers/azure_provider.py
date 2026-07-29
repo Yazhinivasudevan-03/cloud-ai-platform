@@ -10,11 +10,14 @@ region, so no presentation-only lookup table is needed here.
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError, ServiceRequestError
 from azure.identity import ClientSecretCredential
 from azure.mgmt.compute import ComputeManagementClient
+from azure.mgmt.compute import models as compute_models
 from azure.mgmt.containerservice import ContainerServiceClient
 from azure.mgmt.network import NetworkManagementClient
+from azure.mgmt.network import models as network_models
 from azure.mgmt.resource import SubscriptionClient
 from azure.mgmt.sql import SqlManagementClient
 from azure.mgmt.storage import StorageManagementClient
+from azure.mgmt.storage import models as storage_models
 import tenacity
 
 from app.integrations.azure_cost_management import fetch_monthly_costs_by_service
@@ -27,6 +30,11 @@ from app.integrations.cloud_provider_client import (
     ResourceUsageSnapshot,
 )
 from app.utils.exceptions import ValidationAppError
+
+# The one, fixed, smallest/free-tier-eligible VM size deploy() will ever
+# request - not user-configurable in this pass (see aws_provider.py's
+# identical _DEPLOY_INSTANCE_TYPE for the same reasoning).
+_DEPLOY_VM_SIZE = "Standard_B1s"
 
 _RETRYABLE_STATUS_CODES = {429, 500, 503}
 
@@ -230,3 +238,183 @@ class AzureCloudProviderClient(CloudProviderClient):
             for vnet in vnets
             if self._matches_region(vnet.location, region)
         ]
+
+    def deploy(self, region: str, resource_type: str, spec: dict) -> CloudResourceSummary:
+        if resource_type == "compute":
+            return self._deploy_compute(region, spec)
+        if resource_type == "storage":
+            return self._deploy_storage(region, spec)
+        if resource_type == "networking":
+            return self._deploy_networking(region, spec)
+        raise self._not_yet_supported(f"Provisioning of '{resource_type}'")
+
+    def destroy(self, region: str, resource_type: str, resource_id: str) -> None:
+        if resource_type == "compute":
+            return self._destroy_compute(resource_id)
+        if resource_type == "storage":
+            return self._destroy_storage(resource_id)
+        if resource_type == "networking":
+            return self._destroy_networking(resource_id)
+        raise self._not_yet_supported(f"Provisioning of '{resource_type}'")
+
+    @staticmethod
+    def _require_spec(spec: dict, keys: tuple[str, ...]) -> None:
+        missing = [k for k in keys if not spec.get(k)]
+        if missing:
+            raise ValidationAppError(
+                f"Azure deploy requires spec.{', spec.'.join(missing)}", code="AZURE_DEPLOY_SPEC_INCOMPLETE"
+            )
+
+    def _deploy_compute(self, region: str, spec: dict) -> CloudResourceSummary:
+        # A real Azure VM needs a resource group and a network interface
+        # referencing an existing subnet - both real, standard Azure
+        # prerequisites this platform cannot fabricate on the caller's
+        # behalf (the same honest stance as requiring an AMI id for AWS).
+        self._require_spec(spec, ("resource_group", "subnet_id", "admin_username", "admin_password"))
+        resource_group = spec["resource_group"]
+        name = spec.get("name", "cloud-ai-platform-vm")
+        credential = self._credential()
+        subscription_id = self._subscription_id()
+
+        network_client = NetworkManagementClient(credential, subscription_id)
+        nic_name = f"{name}-nic"
+        try:
+            nic_poller = network_client.network_interfaces.begin_create_or_update(
+                resource_group,
+                nic_name,
+                network_models.NetworkInterface(
+                    location=region,
+                    ip_configurations=[
+                        network_models.NetworkInterfaceIPConfiguration(
+                            name="ipconfig1", subnet=network_models.Subnet(id=spec["subnet_id"])
+                        )
+                    ],
+                ),
+            )
+            nic = nic_poller.result()
+
+            compute_client = ComputeManagementClient(credential, subscription_id)
+            image = spec.get(
+                "image_reference",
+                {"publisher": "Canonical", "offer": "0001-com-ubuntu-server-jammy", "sku": "22_04-lts", "version": "latest"},
+            )
+            vm_poller = compute_client.virtual_machines.begin_create_or_update(
+                resource_group,
+                name,
+                compute_models.VirtualMachine(
+                    location=region,
+                    hardware_profile=compute_models.HardwareProfile(vm_size=_DEPLOY_VM_SIZE),
+                    storage_profile=compute_models.StorageProfile(image_reference=compute_models.ImageReference(**image)),
+                    os_profile=compute_models.OSProfile(
+                        computer_name=name,
+                        admin_username=spec["admin_username"],
+                        admin_password=spec["admin_password"],
+                    ),
+                    network_profile=compute_models.NetworkProfile(
+                        network_interfaces=[compute_models.NetworkInterfaceReference(id=nic.id, primary=True)]
+                    ),
+                ),
+            )
+            vm = vm_poller.result()
+        except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
+            raise self._wrap_azure_error(exc, "AZURE_DEPLOY_FAILED") from exc
+
+        return {
+            "id": vm.id,
+            "name": vm.name,
+            "type": _DEPLOY_VM_SIZE,
+            "region": region,
+            "status": vm.provisioning_state or "unknown",
+            "created_at": None,
+        }
+
+    def _destroy_compute(self, resource_id: str) -> None:
+        resource_group, vm_name = self._parse_resource_group_and_name(resource_id)
+        client = ComputeManagementClient(self._credential(), self._subscription_id())
+        try:
+            client.virtual_machines.begin_delete(resource_group, vm_name).result()
+        except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
+            raise self._wrap_azure_error(exc, "AZURE_DESTROY_FAILED") from exc
+
+    def _deploy_storage(self, region: str, spec: dict) -> CloudResourceSummary:
+        self._require_spec(spec, ("resource_group", "name"))
+        client = StorageManagementClient(self._credential(), self._subscription_id())
+        name = spec["name"]
+        try:
+            poller = client.storage_accounts.begin_create(
+                spec["resource_group"],
+                name,
+                storage_models.StorageAccountCreateParameters(
+                    sku=storage_models.Sku(name="Standard_LRS"), kind="StorageV2", location=region
+                ),
+            )
+            account = poller.result()
+        except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
+            raise self._wrap_azure_error(exc, "AZURE_DEPLOY_FAILED") from exc
+
+        return {
+            "id": account.id,
+            "name": account.name,
+            "type": "storage_account",
+            "region": region,
+            "status": account.provisioning_state or "unknown",
+            "created_at": account.creation_time,
+        }
+
+    def _destroy_storage(self, resource_id: str) -> None:
+        resource_group, account_name = self._parse_resource_group_and_name(resource_id)
+        client = StorageManagementClient(self._credential(), self._subscription_id())
+        try:
+            client.storage_accounts.delete(resource_group, account_name)
+        except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
+            raise self._wrap_azure_error(exc, "AZURE_DESTROY_FAILED") from exc
+
+    def _deploy_networking(self, region: str, spec: dict) -> CloudResourceSummary:
+        self._require_spec(spec, ("resource_group",))
+        name = spec.get("name", "cloud-ai-platform-vnet")
+        cidr_block = spec.get("cidr_block", "10.0.0.0/16")
+        client = NetworkManagementClient(self._credential(), self._subscription_id())
+        try:
+            poller = client.virtual_networks.begin_create_or_update(
+                spec["resource_group"],
+                name,
+                network_models.VirtualNetwork(
+                    location=region, address_space=network_models.AddressSpace(address_prefixes=[cidr_block])
+                ),
+            )
+            vnet = poller.result()
+        except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
+            raise self._wrap_azure_error(exc, "AZURE_DEPLOY_FAILED") from exc
+
+        return {
+            "id": vnet.id,
+            "name": vnet.name,
+            "type": "virtual_network",
+            "region": region,
+            "status": vnet.provisioning_state or "unknown",
+            "created_at": None,
+        }
+
+    def _destroy_networking(self, resource_id: str) -> None:
+        resource_group, vnet_name = self._parse_resource_group_and_name(resource_id)
+        client = NetworkManagementClient(self._credential(), self._subscription_id())
+        try:
+            client.virtual_networks.begin_delete(resource_group, vnet_name).result()
+        except (ClientAuthenticationError, HttpResponseError, ServiceRequestError) as exc:
+            raise self._wrap_azure_error(exc, "AZURE_DESTROY_FAILED") from exc
+
+    @staticmethod
+    def _parse_resource_group_and_name(resource_id: str) -> tuple[str, str]:
+        # Azure resource IDs are always
+        # /subscriptions/{sub}/resourceGroups/{rg}/providers/.../{name} -
+        # destroy() only receives the id (as returned by deploy()/list_*()),
+        # so the resource group is recovered from it rather than requiring
+        # the caller to pass it separately again.
+        parts = resource_id.strip("/").split("/")
+        try:
+            rg_index = parts.index("resourceGroups")
+            return parts[rg_index + 1], parts[-1]
+        except (ValueError, IndexError) as exc:
+            raise ValidationAppError(
+                f"'{resource_id}' is not a recognizable Azure resource ID", code="AZURE_DESTROY_FAILED"
+            ) from exc

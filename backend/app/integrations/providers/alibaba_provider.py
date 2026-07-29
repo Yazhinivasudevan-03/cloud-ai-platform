@@ -46,6 +46,11 @@ from app.utils.exceptions import ValidationAppError
 _CMS_NAMESPACE = "acs_ecs_dashboard"
 _DEFAULT_REGION = "cn-hangzhou"
 
+# The one, fixed, smallest/free-tier-eligible instance type deploy() will
+# ever request - not user-configurable in this pass (see aws_provider.py's
+# identical _DEPLOY_INSTANCE_TYPE for the same reasoning).
+_DEPLOY_INSTANCE_TYPE = "ecs.t5-lc1m1.small"
+
 
 class InstanceResourceUsage(TypedDict):
     cpu_usage_percent: float
@@ -336,3 +341,122 @@ class AlibabaCloudProviderClient(CloudProviderClient):
             }
             for vpc in vpcs
         ]
+
+    def deploy(self, region: str, resource_type: str, spec: dict) -> CloudResourceSummary:
+        if resource_type == "compute":
+            return self._deploy_compute(region, spec)
+        if resource_type == "storage":
+            return self._deploy_storage(region, spec)
+        if resource_type == "networking":
+            return self._deploy_networking(region, spec)
+        raise self._not_yet_supported(f"Provisioning of '{resource_type}'")
+
+    def destroy(self, region: str, resource_type: str, resource_id: str) -> None:
+        if resource_type == "compute":
+            return self._destroy_compute(region, resource_id)
+        if resource_type == "storage":
+            return self._destroy_storage(region, resource_id)
+        if resource_type == "networking":
+            return self._destroy_networking(region, resource_id)
+        raise self._not_yet_supported(f"Provisioning of '{resource_type}'")
+
+    def _deploy_compute(self, region: str, spec: dict) -> CloudResourceSummary:
+        # A real ECS instance needs an image and a security group - both
+        # real, standard Alibaba Cloud prerequisites this platform cannot
+        # fabricate on the caller's behalf (the same honest stance as
+        # requiring an AMI id for AWS).
+        image_id = spec.get("image_id")
+        security_group_id = spec.get("security_group_id")
+        if not image_id or not security_group_id:
+            raise ValidationAppError(
+                "Alibaba compute deploy requires spec.image_id and spec.security_group_id",
+                code="ALIBABA_DEPLOY_SPEC_INCOMPLETE",
+            )
+        client = self._ecs_client_for(region)
+        name = spec.get("name", "cloud-ai-platform-instance")
+        request = ecs_models.CreateInstanceRequest(
+            region_id=region,
+            image_id=image_id,
+            instance_type=_DEPLOY_INSTANCE_TYPE,
+            security_group_id=security_group_id,
+            instance_name=name,
+        )
+        try:
+            response = client.create_instance(request)
+        except TeaException as exc:
+            raise self._wrap_tea_exception(exc, "ALIBABA_DEPLOY_FAILED") from exc
+
+        instance_id = response.body.instance_id
+        return {
+            "id": instance_id,
+            "name": name,
+            "type": _DEPLOY_INSTANCE_TYPE,
+            "region": region,
+            "status": "Pending",
+            "created_at": None,
+        }
+
+    def _destroy_compute(self, region: str, resource_id: str) -> None:
+        client = self._ecs_client_for(region)
+        request = ecs_models.DeleteInstanceRequest(instance_id=resource_id, force=True)
+        try:
+            client.delete_instance(request)
+        except TeaException as exc:
+            raise self._wrap_tea_exception(exc, "ALIBABA_DESTROY_FAILED") from exc
+
+    def _oss_bucket(self, region: str, name: str) -> "oss2.Bucket":
+        self.authenticate()
+        auth = oss2.Auth(self.credentials["access_key_id"], self.credentials["access_key_secret"])
+        endpoint = f"https://oss-{region}.aliyuncs.com"
+        return oss2.Bucket(auth, endpoint, name)
+
+    def _deploy_storage(self, region: str, spec: dict) -> CloudResourceSummary:
+        name = spec.get("name")
+        if not name:
+            raise ValidationAppError(
+                "Alibaba storage deploy requires spec.name (a globally-unique OSS bucket name)",
+                code="ALIBABA_DEPLOY_SPEC_INCOMPLETE",
+            )
+        try:
+            self._oss_bucket(region, name).create_bucket()
+        except oss2.exceptions.OssError as exc:
+            raise ValidationAppError(
+                f"Alibaba OSS rejected the deploy request: {exc}", code="ALIBABA_DEPLOY_FAILED"
+            ) from exc
+
+        return {"id": name, "name": name, "type": "oss_bucket", "region": region, "status": "available", "created_at": None}
+
+    def _destroy_storage(self, region: str, resource_id: str) -> None:
+        try:
+            # Requires an already-empty bucket - a real OSS precondition
+            # this platform does not attempt to bypass by force-emptying it.
+            self._oss_bucket(region, resource_id).delete_bucket()
+        except oss2.exceptions.OssError as exc:
+            raise ValidationAppError(
+                f"Alibaba OSS rejected the destroy request: {exc}", code="ALIBABA_DESTROY_FAILED"
+            ) from exc
+
+    def _deploy_networking(self, region: str, spec: dict) -> CloudResourceSummary:
+        cidr_block = spec.get("cidr_block", "10.0.0.0/16")
+        name = spec.get("name", "cloud-ai-platform-vpc")
+        config = self._config_for(region)
+        config.endpoint = f"vpc.{region}.aliyuncs.com"
+        client = VpcClient(config)
+        request = vpc_models.CreateVpcRequest(region_id=region, cidr_block=cidr_block, vpc_name=name)
+        try:
+            response = client.create_vpc(request)
+        except TeaException as exc:
+            raise self._wrap_tea_exception(exc, "ALIBABA_DEPLOY_FAILED") from exc
+
+        vpc_id = response.body.vpc_id
+        return {"id": vpc_id, "name": name, "type": "vpc", "region": region, "status": "Pending", "created_at": None}
+
+    def _destroy_networking(self, region: str, resource_id: str) -> None:
+        config = self._config_for(region)
+        config.endpoint = f"vpc.{region}.aliyuncs.com"
+        client = VpcClient(config)
+        request = vpc_models.DeleteVpcRequest(vpc_id=resource_id)
+        try:
+            client.delete_vpc(request)
+        except TeaException as exc:
+            raise self._wrap_tea_exception(exc, "ALIBABA_DESTROY_FAILED") from exc

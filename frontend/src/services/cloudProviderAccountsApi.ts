@@ -11,7 +11,10 @@ import type {
   CloudProviderAccount,
   CloudProviderAccountCreate,
   CloudProviderAccountUpdate,
+  CloudResource,
   CloudResourceList,
+  DeployResourceRequest,
+  DestroyResourceRequest,
   PaginatedResponse,
   ResourceCategory,
 } from "@/types";
@@ -105,4 +108,21 @@ export const cloudProviderAccountsApi = {
         params: { category, region },
       })
       .then((r) => r.data),
+
+  deployResource: (accountId: number, payload: DeployResourceRequest) =>
+    httpClient
+      .post<CloudResource>(`/cloud-provider-accounts/${accountId}/resources/deploy`, payload)
+      .then((r) => r.data),
+
+  destroyResource: (
+    accountId: number,
+    resourceType: ResourceCategory,
+    resourceId: string,
+    payload: DestroyResourceRequest,
+  ) =>
+    httpClient
+      .delete(`/cloud-provider-accounts/${accountId}/resources/${resourceType}/${encodeURIComponent(resourceId)}`, {
+        data: payload,
+      })
+      .then(() => undefined),
 };

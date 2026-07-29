@@ -458,6 +458,20 @@ export interface CloudResourceList {
   items: CloudResource[];
 }
 
+export const PROVISIONABLE_RESOURCE_TYPES = ["compute", "storage", "networking"] as const;
+export type ProvisionableResourceType = (typeof PROVISIONABLE_RESOURCE_TYPES)[number];
+
+export interface DeployResourceRequest {
+  resource_type: ProvisionableResourceType;
+  region: string;
+  spec: Record<string, string>;
+}
+
+export interface DestroyResourceRequest {
+  region: string;
+  confirm: string;
+}
+
 // --- Notification settings (Phase 20) ----------------------------------
 
 // The 5 tiered categories support per-tier (60/80/90%) checkboxes; the

@@ -32,6 +32,11 @@ from app.integrations.cloud_provider_client import (
 from app.integrations.gcp_monitoring import fetch_instance_resource_usage
 from app.utils.exceptions import ValidationAppError
 
+# The one, fixed, smallest/free-tier-eligible machine type deploy() will
+# ever request - not user-configurable in this pass (see aws_provider.py's
+# identical _DEPLOY_INSTANCE_TYPE for the same reasoning).
+_DEPLOY_MACHINE_TYPE = "e2-micro"
+
 # Compute Engine's Region resource has no dedicated human-readable display
 # name field (unlike Azure's) - this table is presentation-only labelling
 # for regions the live API actually returned, with a raw-id fallback for
@@ -267,3 +272,139 @@ class GcpCloudProviderClient(CloudProviderClient):
             raise ValidationAppError(
                 f"GCP rejected the networking-inventory request: {exc}", code="GCP_NETWORKING_INVENTORY_FAILED"
             ) from exc
+
+    def deploy(self, region: str, resource_type: str, spec: dict) -> CloudResourceSummary:
+        if resource_type == "compute":
+            return self._deploy_compute(region, spec)
+        if resource_type == "storage":
+            return self._deploy_storage(region, spec)
+        if resource_type == "networking":
+            return self._deploy_networking(region, spec)
+        raise self._not_yet_supported(f"Provisioning of '{resource_type}'")
+
+    def destroy(self, region: str, resource_type: str, resource_id: str) -> None:
+        if resource_type == "compute":
+            return self._destroy_compute(region, resource_id, resource_id)
+        if resource_type == "storage":
+            return self._destroy_storage(resource_id)
+        if resource_type == "networking":
+            return self._destroy_networking(resource_id)
+        raise self._not_yet_supported(f"Provisioning of '{resource_type}'")
+
+    def _deploy_compute(self, region: str, spec: dict) -> CloudResourceSummary:
+        image = spec.get("image")
+        if not image:
+            raise ValidationAppError(
+                "GCP compute deploy requires spec.image (a full image resource path, e.g. "
+                "'projects/debian-cloud/global/images/family/debian-12')",
+                code="GCP_DEPLOY_SPEC_INCOMPLETE",
+            )
+        google_credentials, project_id = self._load_credentials()
+        zone = spec.get("zone", f"{region}-a")
+        name = spec.get("name", "cloud-ai-platform-instance")
+
+        instance = compute_v1.Instance(
+            name=name,
+            machine_type=f"zones/{zone}/machineTypes/{_DEPLOY_MACHINE_TYPE}",
+            disks=[
+                compute_v1.AttachedDisk(
+                    boot=True,
+                    auto_delete=True,
+                    initialize_params=compute_v1.AttachedDiskInitializeParams(source_image=image),
+                )
+            ],
+            network_interfaces=[compute_v1.NetworkInterface(network=spec.get("network", "global/networks/default"))],
+        )
+        client = compute_v1.InstancesClient(credentials=google_credentials)
+        try:
+            operation = client.insert(project=project_id, zone=zone, instance_resource=instance)
+            operation.result()
+        except (PermissionDenied, Unauthenticated) as exc:
+            raise ValidationAppError(f"GCP rejected the credentials: {exc}", code="GCP_DEPLOY_FAILED") from exc
+        except GoogleAPICallError as exc:
+            raise ValidationAppError(f"GCP rejected the deploy request: {exc}", code="GCP_DEPLOY_FAILED") from exc
+
+        return {
+            "id": name,
+            "name": name,
+            "type": _DEPLOY_MACHINE_TYPE,
+            "region": region,
+            "status": "provisioning",
+            "created_at": None,
+        }
+
+    def _destroy_compute(self, region: str, zone_hint: str, resource_id: str) -> None:
+        google_credentials, project_id = self._load_credentials()
+        # Compute instances are deleted by name within a zone, not region -
+        # the caller only has the region, so this assumes the same
+        # "{region}-a" default zone deploy() used (a real limitation:
+        # an instance created in a non-default zone within this region
+        # needs its zone tracked separately to be destroyed this way).
+        zone = f"{region}-a"
+        client = compute_v1.InstancesClient(credentials=google_credentials)
+        try:
+            operation = client.delete(project=project_id, zone=zone, instance=resource_id)
+            operation.result()
+        except (PermissionDenied, Unauthenticated) as exc:
+            raise ValidationAppError(f"GCP rejected the credentials: {exc}", code="GCP_DESTROY_FAILED") from exc
+        except GoogleAPICallError as exc:
+            raise ValidationAppError(f"GCP rejected the destroy request: {exc}", code="GCP_DESTROY_FAILED") from exc
+
+    def _deploy_storage(self, region: str, spec: dict) -> CloudResourceSummary:
+        name = spec.get("name")
+        if not name:
+            raise ValidationAppError(
+                "GCP storage deploy requires spec.name (a globally-unique GCS bucket name)",
+                code="GCP_DEPLOY_SPEC_INCOMPLETE",
+            )
+        google_credentials, project_id = self._load_credentials()
+        try:
+            client = storage.Client(credentials=google_credentials, project=project_id)
+            client.create_bucket(name, location=region)
+        except GoogleAPICallError as exc:
+            raise ValidationAppError(f"GCP rejected the deploy request: {exc}", code="GCP_DEPLOY_FAILED") from exc
+
+        return {"id": name, "name": name, "type": "gcs_bucket", "region": region, "status": "available", "created_at": None}
+
+    def _destroy_storage(self, resource_id: str) -> None:
+        google_credentials, project_id = self._load_credentials()
+        try:
+            client = storage.Client(credentials=google_credentials, project=project_id)
+            # Requires an already-empty bucket - a real GCS precondition
+            # this platform does not attempt to bypass by force-emptying it.
+            client.bucket(resource_id).delete()
+        except GoogleAPICallError as exc:
+            raise ValidationAppError(f"GCP rejected the destroy request: {exc}", code="GCP_DESTROY_FAILED") from exc
+
+    def _deploy_networking(self, region: str, spec: dict) -> CloudResourceSummary:
+        google_credentials, project_id = self._load_credentials()
+        name = spec.get("name", "cloud-ai-platform-network")
+        network = compute_v1.Network(name=name, auto_create_subnetworks=spec.get("auto_create_subnetworks", True))
+        client = compute_v1.NetworksClient(credentials=google_credentials)
+        try:
+            operation = client.insert(project=project_id, network_resource=network)
+            operation.result()
+        except (PermissionDenied, Unauthenticated) as exc:
+            raise ValidationAppError(f"GCP rejected the credentials: {exc}", code="GCP_DEPLOY_FAILED") from exc
+        except GoogleAPICallError as exc:
+            raise ValidationAppError(f"GCP rejected the deploy request: {exc}", code="GCP_DEPLOY_FAILED") from exc
+
+        return {
+            "id": name,
+            "name": name,
+            "type": "vpc_network",
+            "region": region,
+            "status": "available",
+            "created_at": None,
+        }
+
+    def _destroy_networking(self, resource_id: str) -> None:
+        google_credentials, project_id = self._load_credentials()
+        client = compute_v1.NetworksClient(credentials=google_credentials)
+        try:
+            operation = client.delete(project=project_id, network=resource_id)
+            operation.result()
+        except (PermissionDenied, Unauthenticated) as exc:
+            raise ValidationAppError(f"GCP rejected the credentials: {exc}", code="GCP_DESTROY_FAILED") from exc
+        except GoogleAPICallError as exc:
+            raise ValidationAppError(f"GCP rejected the destroy request: {exc}", code="GCP_DESTROY_FAILED") from exc
