@@ -40,9 +40,9 @@ export function CloudAccountTimezoneFormDialog({
   open: boolean;
   accountId: number;
   /** Drives the Region field's suggestions (see utils/cloudRegions.ts) - a
-   * provider with no curated table (Oracle Cloud/IBM Cloud/DigitalOcean/
-   * Alibaba Cloud/anything else) falls back to the original plain text
-   * entry, unchanged. */
+   * provider with no curated table (a custom "Other" provider name/anything
+   * else unrecognized) falls back to the original plain text entry,
+   * unchanged. */
   provider: string;
   entry: CloudAccountTimezone | null;
   onClose: () => void;

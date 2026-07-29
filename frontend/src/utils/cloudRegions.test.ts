@@ -30,7 +30,7 @@ describe("regionSuggestionsFor", () => {
 
   it("returns the Azure region table with every timezone a real IANA identifier", () => {
     const regions = regionSuggestionsFor("azure");
-    expect(regions.length).toBeGreaterThan(5);
+    expect(regions.length).toBeGreaterThan(20);
     for (const region of regions) {
       expect(isUsableIanaTimezone(region.timezone)).toBe(true);
     }
@@ -38,6 +38,38 @@ describe("regionSuggestionsFor", () => {
 
   it("returns the GCP region table with every timezone a real IANA identifier", () => {
     const regions = regionSuggestionsFor("gcp");
+    expect(regions.length).toBeGreaterThan(20);
+    for (const region of regions) {
+      expect(isUsableIanaTimezone(region.timezone)).toBe(true);
+    }
+  });
+
+  it("returns the OCI region table with every timezone a real IANA identifier", () => {
+    const regions = regionSuggestionsFor("oci");
+    expect(regions.length).toBeGreaterThan(10);
+    for (const region of regions) {
+      expect(isUsableIanaTimezone(region.timezone)).toBe(true);
+    }
+  });
+
+  it("returns the IBM Cloud region table with every timezone a real IANA identifier", () => {
+    const regions = regionSuggestionsFor("ibm");
+    expect(regions.length).toBeGreaterThan(3);
+    for (const region of regions) {
+      expect(isUsableIanaTimezone(region.timezone)).toBe(true);
+    }
+  });
+
+  it("returns the DigitalOcean region table with every timezone a real IANA identifier", () => {
+    const regions = regionSuggestionsFor("digitalocean");
+    expect(regions.length).toBeGreaterThan(3);
+    for (const region of regions) {
+      expect(isUsableIanaTimezone(region.timezone)).toBe(true);
+    }
+  });
+
+  it("returns the Alibaba Cloud region table with every timezone a real IANA identifier", () => {
+    const regions = regionSuggestionsFor("alibaba");
     expect(regions.length).toBeGreaterThan(10);
     for (const region of regions) {
       expect(isUsableIanaTimezone(region.timezone)).toBe(true);
@@ -50,10 +82,11 @@ describe("regionSuggestionsFor", () => {
   });
 
   it("returns an empty list for providers with no curated table (not an error)", () => {
+    // "oracle" deliberately has no entry - the real key is "oci" (matching
+    // the backend's provider_factory registry and the official OCI SDK/CLI
+    // naming convention), so a stale/mistyped provider string still falls
+    // back to plain free-text entry rather than erroring.
     expect(regionSuggestionsFor("oracle")).toEqual([]);
-    expect(regionSuggestionsFor("ibm")).toEqual([]);
-    expect(regionSuggestionsFor("digitalocean")).toEqual([]);
-    expect(regionSuggestionsFor("alibaba")).toEqual([]);
     expect(regionSuggestionsFor("other")).toEqual([]);
     expect(regionSuggestionsFor("")).toEqual([]);
   });
@@ -78,12 +111,12 @@ describe("regionSuggestionsFor", () => {
   });
 
   it.each([
-    ["UK South", "Europe/London"],
-    ["Central India", "Asia/Kolkata"],
-    ["West Europe", "Europe/Amsterdam"],
-    ["North Europe", "Europe/Dublin"],
-    ["Australia East", "Australia/Sydney"],
-    ["Japan East", "Asia/Tokyo"],
+    ["uksouth", "Europe/London"],
+    ["centralindia", "Asia/Kolkata"],
+    ["westeurope", "Europe/Amsterdam"],
+    ["northeurope", "Europe/Dublin"],
+    ["australiaeast", "Australia/Sydney"],
+    ["japaneast", "Asia/Tokyo"],
   ])("Azure %s maps to %s", (code, timezone) => {
     expect(findRegionSuggestion("azure", code)?.timezone).toBe(timezone);
   });
@@ -98,6 +131,39 @@ describe("regionSuggestionsFor", () => {
     ["us-east1", "America/New_York"],
   ])("GCP %s maps to %s", (code, timezone) => {
     expect(findRegionSuggestion("gcp", code)?.timezone).toBe(timezone);
+  });
+
+  it.each([
+    ["us-ashburn-1", "America/New_York"],
+    ["uk-london-1", "Europe/London"],
+    ["ap-mumbai-1", "Asia/Kolkata"],
+    ["ap-sydney-1", "Australia/Sydney"],
+  ])("OCI %s maps to %s", (code, timezone) => {
+    expect(findRegionSuggestion("oci", code)?.timezone).toBe(timezone);
+  });
+
+  it.each([
+    ["us-south", "America/Chicago"],
+    ["eu-gb", "Europe/London"],
+    ["jp-tok", "Asia/Tokyo"],
+  ])("IBM Cloud %s maps to %s", (code, timezone) => {
+    expect(findRegionSuggestion("ibm", code)?.timezone).toBe(timezone);
+  });
+
+  it.each([
+    ["nyc1", "America/New_York"],
+    ["lon1", "Europe/London"],
+    ["sgp1", "Asia/Singapore"],
+  ])("DigitalOcean %s maps to %s", (code, timezone) => {
+    expect(findRegionSuggestion("digitalocean", code)?.timezone).toBe(timezone);
+  });
+
+  it.each([
+    ["cn-hangzhou", "Asia/Shanghai"],
+    ["ap-southeast-1", "Asia/Singapore"],
+    ["eu-central-1", "Europe/Berlin"],
+  ])("Alibaba Cloud %s maps to %s", (code, timezone) => {
+    expect(findRegionSuggestion("alibaba", code)?.timezone).toBe(timezone);
   });
 });
 

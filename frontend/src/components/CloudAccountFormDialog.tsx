@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  Autocomplete,
   Button,
   Dialog,
   DialogActions,
@@ -17,6 +18,7 @@ import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { cloudProviderAccountsApi } from "@/services/cloudProviderAccountsApi";
 import { KNOWN_PROVIDERS } from "@/utils/cloudProviders";
+import { regionSuggestionsFor } from "@/utils/cloudRegions";
 import type { CloudProviderAccount } from "@/types";
 
 interface CredentialField {
@@ -54,6 +56,13 @@ export function CloudAccountFormDialog({
 
   const resolvedProvider = provider === "other" ? customProvider.trim() : provider;
 
+  // Searchable region suggestions (utils/cloudRegions.ts, the same central
+  // catalog CloudAccountTimezoneFormDialog already uses) - a provider with
+  // no curated table (a custom "Other" provider) falls back to today's
+  // plain free-text Region field, unchanged.
+  const regionSuggestions = regionSuggestionsFor(resolvedProvider);
+  const matchedSuggestion = regionSuggestions.find((r) => r.code === region);
+
   const mutation = useMutation({
     mutationFn: () => {
       const credentials = Object.fromEntries(
@@ -75,8 +84,27 @@ export function CloudAccountFormDialog({
       }
       return cloudProviderAccountsApi.create({ ...basePayload, credentials });
     },
-    onSuccess: () => {
+    onSuccess: (savedAccount) => {
       void queryClient.invalidateQueries({ queryKey: ["cloud-provider-accounts"] });
+
+      // Automatically associates the selected region's recommended IANA
+      // timezone (see utils/cloudRegions.ts) so monitoring/dashboards/
+      // alerts/notifications for deployments linked to this account can
+      // show local time (Phase 22's existing CloudAccountTimezone feature)
+      // without the user having to add it by hand. Best-effort only - a
+      // duplicate (e.g. re-saving the same region on edit) or any other
+      // failure here must never block the account connect/save itself,
+      // which has already succeeded by this point.
+      if (matchedSuggestion) {
+        cloudProviderAccountsApi
+          .createTimezone(savedAccount.id, {
+            region: matchedSuggestion.code,
+            label: matchedSuggestion.label,
+            timezone: matchedSuggestion.timezone,
+          })
+          .catch(() => {});
+      }
+
       onClose();
     },
   });
@@ -129,14 +157,50 @@ export function CloudAccountFormDialog({
             fullWidth
           />
 
-          <TextField
-            label="Region"
-            value={region}
-            onChange={(e) => setRegion(e.target.value)}
-            placeholder="e.g. us-east-1, eastus, us-central1"
-            required
-            fullWidth
-          />
+          {regionSuggestions.length > 0 ? (
+            <Autocomplete
+              freeSolo
+              options={regionSuggestions}
+              getOptionLabel={(option) => (typeof option === "string" ? option : `${option.code} (${option.label})`)}
+              isOptionEqualToValue={(option, value) =>
+                typeof value === "string" ? option.code === value : option.code === value.code
+              }
+              value={matchedSuggestion ?? region}
+              onChange={(_, newValue) => {
+                if (newValue === null) {
+                  setRegion("");
+                } else if (typeof newValue === "string") {
+                  setRegion(newValue);
+                } else {
+                  setRegion(newValue.code);
+                }
+              }}
+              onInputChange={(_, newInputValue, reason) => {
+                if (reason === "input") setRegion(newInputValue);
+              }}
+              slotProps={{ listbox: { style: { maxHeight: 300, overflow: "auto" } } }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Region"
+                  placeholder="Search by region code or location, e.g. eu-west-2 or London"
+                  required
+                  helperText={
+                    matchedSuggestion ? `Timezone will be set to ${matchedSuggestion.timezone}` : undefined
+                  }
+                />
+              )}
+            />
+          ) : (
+            <TextField
+              label="Region"
+              value={region}
+              onChange={(e) => setRegion(e.target.value)}
+              placeholder="e.g. us-east-1, eastus, us-central1"
+              required
+              fullWidth
+            />
+          )}
 
           <TextField
             label="Account / Subscription / Project ID (optional)"
