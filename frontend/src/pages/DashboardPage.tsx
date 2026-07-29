@@ -6,6 +6,7 @@ import Grid from "@mui/material/Grid2";
 import AddIcon from "@mui/icons-material/Add";
 import CloudQueueIcon from "@mui/icons-material/CloudQueueOutlined";
 import FolderIcon from "@mui/icons-material/FolderOutlined";
+import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import MonitorHeartOutlinedIcon from "@mui/icons-material/MonitorHeartOutlined";
 import NotificationsActiveIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import TuneIcon from "@mui/icons-material/TuneOutlined";
@@ -175,14 +176,25 @@ export function DashboardPage() {
                         {account.region}
                       </Typography>
                     </Stack>
+                    {!account.credentials_validated && (
+                      <Typography variant="caption" color="warning.main">
+                        No cloud credentials configured.
+                      </Typography>
+                    )}
                   </Stack>
                   <Button
                     size="small"
                     component={RouterLink}
                     to={`/cloud-accounts/${account.id}`}
-                    startIcon={<MonitorHeartOutlinedIcon fontSize="small" />}
+                    startIcon={
+                      account.credentials_validated ? (
+                        <MonitorHeartOutlinedIcon fontSize="small" />
+                      ) : (
+                        <LockOutlinedIcon fontSize="small" />
+                      )
+                    }
                   >
-                    Monitor
+                    {account.credentials_validated ? "Monitor" : "Configure Credentials"}
                   </Button>
                 </Paper>
               </Grid>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Autocomplete,
@@ -15,9 +15,16 @@ import {
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
+import UploadFileIcon from "@mui/icons-material/UploadFileOutlined";
+import { ConnectionTestResultPanel } from "@/components/ConnectionTestResultPanel";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { cloudProviderAccountsApi } from "@/services/cloudProviderAccountsApi";
 import { KNOWN_PROVIDERS } from "@/utils/cloudProviders";
+import {
+  accountAliasLabel,
+  hasStructuredCredentialFields,
+  PROVIDER_CREDENTIAL_FIELDS,
+} from "@/utils/cloudCredentialFields";
 import { regionSuggestionsFor } from "@/utils/cloudRegions";
 import type { CloudProviderAccount } from "@/types";
 
@@ -53,8 +60,46 @@ export function CloudAccountFormDialog({
   // edit this always starts empty - leaving every row blank means "keep the
   // existing stored credentials unchanged" (only non-empty rows are sent).
   const [credentialFields, setCredentialFields] = useState<CredentialField[]>([{ key: "", value: "" }]);
+  // Structured, provider-specific credential fields (Phase 26) - used
+  // instead of the generic key/value editor above for any provider with a
+  // real backend adapter (see utils/cloudCredentialFields.ts).
+  const [structuredCredentials, setStructuredCredentials] = useState<Record<string, string>>({});
 
   const resolvedProvider = provider === "other" ? customProvider.trim() : provider;
+  const usesStructuredFields = hasStructuredCredentialFields(resolvedProvider);
+
+  const testConnectionMutation = useMutation({
+    mutationFn: () =>
+      cloudProviderAccountsApi.testConnection({
+        provider: resolvedProvider,
+        region: region.trim(),
+        credentials: structuredCredentials,
+      }),
+  });
+
+  // Resets the Phase 26 credential-testing state whenever the dialog opens
+  // (including reopening for a different account) or the provider changes -
+  // stale field values/results from a previous provider must never leak in.
+  useEffect(() => {
+    if (open) {
+      setStructuredCredentials({});
+      testConnectionMutation.reset();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, account?.id]);
+
+  useEffect(() => {
+    setStructuredCredentials({});
+    testConnectionMutation.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedProvider]);
+
+  const requiredStructuredFieldsFilled =
+    usesStructuredFields &&
+    PROVIDER_CREDENTIAL_FIELDS[resolvedProvider]
+      .filter((f) => f.required)
+      .every((f) => (structuredCredentials[f.key] ?? "").trim() !== "") &&
+    region.trim() !== "";
 
   // Searchable region suggestions (utils/cloudRegions.ts, the same central
   // catalog CloudAccountTimezoneFormDialog already uses) - a provider with
@@ -63,13 +108,21 @@ export function CloudAccountFormDialog({
   const regionSuggestions = regionSuggestionsFor(resolvedProvider);
   const matchedSuggestion = regionSuggestions.find((r) => r.code === region);
 
+  const hasNewCredentials = usesStructuredFields
+    ? Object.values(structuredCredentials).some((v) => v.trim() !== "")
+    : credentialFields.some((f) => f.key.trim() !== "" && f.value.trim() !== "");
+
   const mutation = useMutation({
     mutationFn: () => {
-      const credentials = Object.fromEntries(
-        credentialFields
-          .filter((f) => f.key.trim() !== "" && f.value.trim() !== "")
-          .map((f) => [f.key.trim(), f.value])
-      );
+      const credentials = usesStructuredFields
+        ? Object.fromEntries(
+            Object.entries(structuredCredentials).filter(([, value]) => value.trim() !== "")
+          )
+        : Object.fromEntries(
+            credentialFields
+              .filter((f) => f.key.trim() !== "" && f.value.trim() !== "")
+              .map((f) => [f.key.trim(), f.value])
+          );
       const basePayload = {
         provider: resolvedProvider,
         account_name: accountName.trim(),
@@ -105,6 +158,18 @@ export function CloudAccountFormDialog({
           .catch(() => {});
       }
 
+      // Phase 26, requirement 5: automatically begin monitoring once new
+      // credentials are saved - re-validates them for real server-side
+      // (never trusts the earlier Test Connection click) and, on success,
+      // unblocks region sync/resource inventory/alerting for this account.
+      // Best-effort: a validation failure here must not block the save
+      // itself, which already succeeded - the account simply stays in its
+      // "credentials not validated yet" state, surfaced on the Cloud
+      // Account detail page and Dashboard.
+      if (hasNewCredentials) {
+        cloudProviderAccountsApi.validateCredentials(savedAccount.id).catch(() => {});
+      }
+
       onClose();
     },
   });
@@ -113,7 +178,7 @@ export function CloudAccountFormDialog({
     accountName.trim() !== "" &&
     region.trim() !== "" &&
     resolvedProvider !== "" &&
-    (isEdit || credentialFields.some((f) => f.key.trim() !== "" && f.value.trim() !== ""));
+    (isEdit || hasNewCredentials);
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
@@ -203,7 +268,7 @@ export function CloudAccountFormDialog({
           )}
 
           <TextField
-            label="Account / Subscription / Project ID (optional)"
+            label={accountAliasLabel(resolvedProvider)}
             value={accountIdentifier}
             onChange={(e) => setAccountIdentifier(e.target.value)}
             fullWidth
@@ -217,51 +282,120 @@ export function CloudAccountFormDialog({
               </Typography>
             )}
           </Typography>
-          {credentialFields.map((field, index) => (
-            <Stack direction="row" spacing={1} key={index} alignItems="center">
-              <TextField
-                label="Key"
-                placeholder="e.g. access_key_id"
-                value={field.key}
-                onChange={(e) => {
-                  const next = [...credentialFields];
-                  next[index] = { ...next[index], key: e.target.value };
-                  setCredentialFields(next);
-                }}
+
+          {usesStructuredFields ? (
+            <>
+              {PROVIDER_CREDENTIAL_FIELDS[resolvedProvider].map((field) => (
+                <TextField
+                  key={field.key}
+                  label={field.label}
+                  placeholder={isEdit ? "Leave blank to keep the existing value" : field.placeholder}
+                  helperText={field.helperText}
+                  value={structuredCredentials[field.key] ?? ""}
+                  onChange={(e) =>
+                    setStructuredCredentials((prev) => ({ ...prev, [field.key]: e.target.value }))
+                  }
+                  type={field.type === "password" ? "password" : "text"}
+                  multiline={field.type === "multiline"}
+                  minRows={field.type === "multiline" ? 4 : undefined}
+                  fullWidth
+                />
+              ))}
+              {resolvedProvider === "gcp" && (
+                <Button size="small" component="label" startIcon={<UploadFileIcon />} sx={{ alignSelf: "flex-start" }}>
+                  Upload service account JSON file
+                  <input
+                    type="file"
+                    accept="application/json"
+                    hidden
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () =>
+                        setStructuredCredentials((prev) => ({
+                          ...prev,
+                          service_account_json: String(reader.result ?? ""),
+                        }));
+                      reader.readAsText(file);
+                    }}
+                  />
+                </Button>
+              )}
+
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                <Button
+                  variant="outlined"
+                  disabled={!requiredStructuredFieldsFilled}
+                  loading={testConnectionMutation.isPending}
+                  onClick={() => testConnectionMutation.mutate()}
+                >
+                  Test Connection
+                </Button>
+                <Typography variant="caption" color="text.secondary">
+                  Validates these credentials with a real, live call before you save - nothing is stored
+                  until you click {isEdit ? "Save" : "Add"}.
+                </Typography>
+              </Stack>
+              <ErrorAlert error={testConnectionMutation.error} />
+              {testConnectionMutation.data && <ConnectionTestResultPanel result={testConnectionMutation.data} />}
+            </>
+          ) : (
+            <>
+              {(provider === "ibm" || provider === "digitalocean") && (
+                <Typography variant="caption" color="text.secondary">
+                  Live connection testing isn't available for this provider yet - credentials are still
+                  saved encrypted, but "Test Connection" can't verify them against a real API in this
+                  pass.
+                </Typography>
+              )}
+              {credentialFields.map((field, index) => (
+                <Stack direction="row" spacing={1} key={index} alignItems="center">
+                  <TextField
+                    label="Key"
+                    placeholder="e.g. access_key_id"
+                    value={field.key}
+                    onChange={(e) => {
+                      const next = [...credentialFields];
+                      next[index] = { ...next[index], key: e.target.value };
+                      setCredentialFields(next);
+                    }}
+                    size="small"
+                    fullWidth
+                  />
+                  <TextField
+                    label="Value"
+                    placeholder="e.g. secret_access_key value"
+                    type="password"
+                    value={field.value}
+                    onChange={(e) => {
+                      const next = [...credentialFields];
+                      next[index] = { ...next[index], value: e.target.value };
+                      setCredentialFields(next);
+                    }}
+                    size="small"
+                    fullWidth
+                  />
+                  <IconButton
+                    size="small"
+                    aria-label="Remove field"
+                    disabled={credentialFields.length === 1}
+                    onClick={() => setCredentialFields(credentialFields.filter((_, i) => i !== index))}
+                  >
+                    <RemoveCircleOutlineIcon fontSize="small" />
+                  </IconButton>
+                </Stack>
+              ))}
+              <Button
                 size="small"
-                fullWidth
-              />
-              <TextField
-                label="Value"
-                placeholder="e.g. secret_access_key value"
-                type="password"
-                value={field.value}
-                onChange={(e) => {
-                  const next = [...credentialFields];
-                  next[index] = { ...next[index], value: e.target.value };
-                  setCredentialFields(next);
-                }}
-                size="small"
-                fullWidth
-              />
-              <IconButton
-                size="small"
-                aria-label="Remove field"
-                disabled={credentialFields.length === 1}
-                onClick={() => setCredentialFields(credentialFields.filter((_, i) => i !== index))}
+                startIcon={<AddIcon />}
+                sx={{ alignSelf: "flex-start" }}
+                onClick={() => setCredentialFields([...credentialFields, { key: "", value: "" }])}
               >
-                <RemoveCircleOutlineIcon fontSize="small" />
-              </IconButton>
-            </Stack>
-          ))}
-          <Button
-            size="small"
-            startIcon={<AddIcon />}
-            sx={{ alignSelf: "flex-start" }}
-            onClick={() => setCredentialFields([...credentialFields, { key: "", value: "" }])}
-          >
-            Add credential field
-          </Button>
+                Add credential field
+              </Button>
+            </>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions>

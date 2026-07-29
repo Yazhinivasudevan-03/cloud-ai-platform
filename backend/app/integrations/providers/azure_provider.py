@@ -139,6 +139,21 @@ class AzureCloudProviderClient(CloudProviderClient):
             ) from exc
         return [subscription.subscription_id for subscription in subscriptions]
 
+    def _identity(self) -> tuple[str | None, str | None, str | None]:
+        # Best-effort only - the base class's test_connection() has already
+        # proven the credentials work via a real list_regions() call by the
+        # time this runs; a failure to fetch the subscription's display
+        # name here must never fail an otherwise-successful connection test.
+        subscription_id = self.credentials.get("subscription_id")
+        account_alias = None
+        try:
+            client = SubscriptionClient(self._credential())
+            subscription = client.subscriptions.get(subscription_id)
+            account_alias = subscription.display_name
+        except (ClientAuthenticationError, HttpResponseError, ServiceRequestError):
+            pass
+        return subscription_id, account_alias, self.credentials.get("client_id")
+
     def list_monitoring(self, resource_id: str, lookback_minutes: int) -> ResourceUsageSnapshot:
         return fetch_vm_resource_usage(self.credentials, self.region, resource_id, lookback_minutes)  # type: ignore[return-value]
 

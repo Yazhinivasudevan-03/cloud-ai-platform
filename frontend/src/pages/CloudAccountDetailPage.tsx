@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Box, Chip, Link, Paper, Stack, Typography } from "@mui/material";
+import { Box, Button, Chip, Link, Paper, Stack, Typography } from "@mui/material";
+import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import { PageHeader } from "@/components/PageHeader";
 import { AlertTimeCell } from "@/components/AlertTimeCell";
 import { CloudAccountAlertThresholdsCard } from "@/components/CloudAccountAlertThresholdsCard";
+import { CloudAccountFormDialog } from "@/components/CloudAccountFormDialog";
 import { CloudAccountRegionsCard } from "@/components/CloudAccountRegionsCard";
 import { CloudAccountResourcesCard } from "@/components/CloudAccountResourcesCard";
 import { CloudAccountTimezonesCard } from "@/components/CloudAccountTimezonesCard";
@@ -21,18 +23,27 @@ export function CloudAccountDetailPage() {
   const { accountId } = useParams();
   const id = Number(accountId);
   const [timeMode, setTimeMode] = useState<TimeDisplayMode>("utc");
+  const [configureCredentialsOpen, setConfigureCredentialsOpen] = useState(false);
 
   const accountQuery = useQuery({
     queryKey: ["cloud-provider-accounts", id],
     queryFn: () => cloudProviderAccountsApi.get(id),
   });
+  // Phase 26: monitoring must never be attempted (and its raw provider
+  // errors never surfaced) until credentials have been proven to work -
+  // these two queries are only enabled once the account is validated, so
+  // an unconfigured/invalid account shows the "Configure Credentials"
+  // empty-state below instead of a query error.
+  const monitoringEnabled = accountQuery.data?.credentials_validated === true;
   const deploymentsQuery = useQuery({
     queryKey: ["cloud-provider-accounts", id, "deployments"],
     queryFn: () => cloudProviderAccountsApi.listLinkedDeployments(id),
+    enabled: monitoringEnabled,
   });
   const alertsQuery = useQuery({
     queryKey: ["cloud-provider-accounts", id, "alerts"],
     queryFn: () => cloudProviderAccountsApi.listActiveAlerts(id),
+    enabled: monitoringEnabled,
   });
 
   const alertColumns: DataTableColumn<Alert>[] = [
@@ -67,6 +78,24 @@ export function CloudAccountDetailPage() {
       />
       <ErrorAlert error={accountQuery.error} />
 
+      {accountQuery.data && !accountQuery.data.credentials_validated && (
+        <Paper sx={{ p: 3, mb: 3, textAlign: "center" }} variant="outlined">
+          <LockOutlinedIcon color="warning" sx={{ fontSize: 40, mb: 1 }} />
+          <Typography variant="h6" gutterBottom>
+            Cloud credentials are required before monitoring can begin.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Resource discovery, CloudWatch-style metric collection, dashboard population, and alert
+            monitoring will start automatically as soon as valid credentials are saved.
+          </Typography>
+          <Button variant="contained" onClick={() => setConfigureCredentialsOpen(true)}>
+            Configure {providerLabel(accountQuery.data.provider)} Credentials
+          </Button>
+        </Paper>
+      )}
+
+      {monitoringEnabled && (
+      <>
       <Paper sx={{ p: 2.5, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
           Linked deployments
@@ -156,6 +185,16 @@ export function CloudAccountDetailPage() {
           emptyMessage="No active alerts for this account's deployments."
         />
       </Paper>
+      </>
+      )}
+
+      {accountQuery.data && (
+        <CloudAccountFormDialog
+          open={configureCredentialsOpen}
+          account={accountQuery.data}
+          onClose={() => setConfigureCredentialsOpen(false)}
+        />
+      )}
     </>
   );
 }

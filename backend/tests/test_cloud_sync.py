@@ -53,6 +53,10 @@ def _seed_cloudwatch_datapoint(instance_id: str) -> None:
 
 
 def _make_cloud_account(db_session, user_id: int, provider: str = "aws") -> CloudProviderAccount:
+    # credentials_validated=True - this test suite is about CloudSyncService's
+    # metrics sync behavior, not the Phase 26 credential-validation workflow
+    # itself, so this fixture represents an already-connected, already-working
+    # account (the same implicit assumption every pre-Phase-26 test made).
     account = CloudProviderAccount(
         user_id=user_id,
         provider=provider,
@@ -61,6 +65,7 @@ def _make_cloud_account(db_session, user_id: int, provider: str = "aws") -> Clou
         credentials_encrypted=encrypt_credentials(
             {"access_key_id": "testing", "secret_access_key": "testing"}
         ),
+        credentials_validated=True,
     )
     db_session.add(account)
     db_session.commit()
@@ -186,6 +191,49 @@ def test_sync_all_tolerates_individual_failures(client, make_user_with_role, db_
 
     assert summary.deployments_attempted == 2
     assert summary.deployments_synced == 1
+    assert summary.deployments_failed == 1
+
+
+@mock_aws
+def test_sync_all_skips_a_deployment_whose_account_credentials_are_not_validated(
+    client, make_user_with_role, db_session
+):
+    """Phase 26: monitoring must never run against an account whose
+    credentials haven't been proven to work yet (see
+    CloudProviderAccountService.validate_credentials) - sync_deployment
+    raises CLOUD_CREDENTIALS_NOT_VALIDATED, which sync_all's existing
+    per-deployment tolerance already turns into a skipped/failed count
+    rather than aborting the whole run."""
+    from app.services.cloud_sync_service import CloudSyncService
+
+    token = make_user_with_role("cloud_sync_op_unvalidated", "operator")
+    me = client.get("/api/v1/auth/me", headers=_auth_header(token)).json()
+
+    unvalidated_account = CloudProviderAccount(
+        user_id=me["id"],
+        provider="aws",
+        account_name="unvalidated-account",
+        region="us-east-1",
+        credentials_encrypted=encrypt_credentials({"access_key_id": "testing", "secret_access_key": "testing"}),
+    )
+    db_session.add(unvalidated_account)
+    db_session.commit()
+    db_session.refresh(unvalidated_account)
+
+    deployment = _make_deployment(client, token, "unvalidated")
+    client.put(
+        f"/api/v1/deployments/{deployment['id']}",
+        json={
+            "cloud_provider_account_id": unvalidated_account.id,
+            "cloud_resource_identifier": "i-unvalidated-test",
+        },
+        headers=_auth_header(token),
+    )
+
+    summary = CloudSyncService(db_session).sync_all()
+
+    assert summary.deployments_attempted == 1
+    assert summary.deployments_synced == 0
     assert summary.deployments_failed == 1
 
 

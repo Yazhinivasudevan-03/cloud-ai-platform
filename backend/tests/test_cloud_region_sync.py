@@ -22,12 +22,17 @@ def _auth_header(token: str) -> dict:
 
 
 def _make_cloud_account(db_session, user_id: int, suffix: str) -> CloudProviderAccount:
+    # credentials_validated=True - these tests are about region discovery/
+    # sync behavior, not the Phase 26 credential-validation workflow itself,
+    # so this fixture represents an already-connected, already-working
+    # account (the same implicit assumption every pre-Phase-26 test made).
     account = CloudProviderAccount(
         user_id=user_id,
         provider="aws",
         account_name=f"region-test-{suffix}",
         region="us-east-1",
         credentials_encrypted=encrypt_credentials({"access_key_id": "testing", "secret_access_key": "testing"}),
+        credentials_validated=True,
     )
     db_session.add(account)
     db_session.commit()
@@ -273,6 +278,7 @@ def test_sync_all_regions_tolerates_an_unsupported_provider(client, make_user_wi
         account_name="region-test-broken",
         region="nowhere-1",
         credentials_encrypted=encrypt_credentials({"anything": "goes"}),
+        credentials_validated=True,
     )
     db_session.add(bad_account)
     db_session.commit()
@@ -288,3 +294,24 @@ def test_sync_all_regions_tolerates_an_unsupported_provider(client, make_user_wi
     db_session.refresh(bad_account)
     assert good_account.connection_status == "CONNECTED"
     assert bad_account.connection_status == "ERROR"
+
+
+def test_sync_all_regions_skips_an_account_with_unvalidated_credentials(client, make_user_with_role, db_session):
+    # Phase 26: the scheduled region-sync sweep must never run against an
+    # account whose credentials haven't been proven to work yet.
+    token = make_user_with_role("region_op_unvalidated", "operator")
+    me = client.get("/api/v1/auth/me", headers=_auth_header(token)).json()
+
+    unvalidated_account = CloudProviderAccount(
+        user_id=me["id"],
+        provider="aws",
+        account_name="region-test-unvalidated",
+        region="us-east-1",
+        credentials_encrypted=encrypt_credentials({"access_key_id": "testing", "secret_access_key": "testing"}),
+    )
+    db_session.add(unvalidated_account)
+    db_session.commit()
+
+    summary = CloudRegionSyncService(db_session).sync_all_regions()
+
+    assert summary.accounts_attempted == 0

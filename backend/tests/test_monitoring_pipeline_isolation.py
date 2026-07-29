@@ -48,12 +48,16 @@ def _seed_cloudwatch_cpu(instance_id: str, cpu_percent: float) -> None:
 
 
 def _make_cloud_account(db_session, user_id: int, suffix: str) -> CloudProviderAccount:
+    # credentials_validated=True - this test proves cross-tenant pipeline
+    # isolation, not the Phase 26 credential-validation workflow itself, so
+    # this fixture represents an already-connected, already-working account.
     account = CloudProviderAccount(
         user_id=user_id,
         provider="aws",
         account_name=f"pipeline-test-{suffix}",
         region="us-east-1",
         credentials_encrypted=encrypt_credentials({"access_key_id": "testing", "secret_access_key": "testing"}),
+        credentials_validated=True,
     )
     db_session.add(account)
     db_session.commit()

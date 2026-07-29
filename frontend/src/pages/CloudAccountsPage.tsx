@@ -51,6 +51,17 @@ export function CloudAccountsPage() {
     { header: "Region", render: (a) => a.region },
     { header: "Identifier", render: (a) => a.account_identifier || "-" },
     {
+      header: "Credentials",
+      render: (a) => (
+        <Chip
+          size="small"
+          label={a.credentials_validated ? "Validated" : "Not configured"}
+          color={a.credentials_validated ? "success" : "warning"}
+          variant="outlined"
+        />
+      ),
+    },
+    {
       header: "Status",
       render: (a) => (
         <Chip

@@ -160,6 +160,23 @@ class GcpCloudProviderClient(CloudProviderClient):
         _, project_id = self._load_credentials()
         return [project_id]
 
+    def _identity(self) -> tuple[str | None, str | None, str | None]:
+        # Best-effort only - the base class's test_connection() has already
+        # proven the credentials work via a real list_regions() call by the
+        # time this runs. No cheap, reliably-enabled API gives a friendlier
+        # "account alias" than the project id itself, so that's left None
+        # rather than an extra fragile call - the service account's own
+        # email is a real, always-available "principal" equivalent.
+        service_account_json = self.credentials.get("service_account_json")
+        principal = None
+        if service_account_json:
+            try:
+                principal = json.loads(service_account_json).get("client_email")
+            except (TypeError, ValueError):
+                principal = None
+        _, project_id = self._load_credentials()
+        return project_id, None, principal
+
     def list_monitoring(self, resource_id: str, lookback_minutes: int) -> ResourceUsageSnapshot:
         return fetch_instance_resource_usage(self.credentials, self.region, resource_id, lookback_minutes)  # type: ignore[return-value]
 

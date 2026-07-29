@@ -395,6 +395,11 @@ export interface CloudProviderAccount {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  // Phase 26: whether the stored credentials have actually been proven to
+  // work via a real test_connection() call - drives the "Cloud credentials
+  // are required before monitoring can begin" gating states.
+  credentials_validated: boolean;
+  credentials_validated_at: string | null;
 }
 
 export interface CloudAccountDeploymentSummary {
@@ -420,6 +425,23 @@ export interface CloudProviderAccountUpdate {
   account_identifier?: string;
   credentials?: Record<string, string>;
   is_active?: boolean;
+}
+
+// --- Cloud Credential Configuration workflow (Phase 26) ------------------
+
+export interface TestConnectionRequest {
+  provider: string;
+  region: string;
+  credentials: Record<string, string>;
+}
+
+export interface ConnectionTestResult {
+  provider: string;
+  account_id: string | null;
+  account_alias: string | null;
+  principal: string | null;
+  region: string;
+  status: string;
 }
 
 // --- Dynamic multi-cloud region discovery (Phase 25) --------------------

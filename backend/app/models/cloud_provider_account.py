@@ -58,6 +58,21 @@ class CloudProviderAccount(TimestampMixin, Base):
     # a newly-created account's credentials are valid until proven otherwise).
     connection_status: Mapped[str] = mapped_column(String(30), nullable=False, default="CONNECTED")
 
+    # --- Credential configuration workflow ---
+    # Whether the currently-stored credentials have actually been proven to
+    # work via a real test_connection() call (STS GetCallerIdentity for AWS,
+    # the provider's own equivalent elsewhere) - distinct from
+    # connection_status, which only reflects the *region sync's* outcome.
+    # False for a newly-created/edited account until POST
+    # /{id}/validate-credentials succeeds; pre-existing accounts are
+    # backfilled True by the migration (preserving today's implicit
+    # "already connected = already trusted" behavior). Scheduled sync sweeps
+    # (CloudSyncService.sync_all, CloudRegionSyncService.sync_all_regions)
+    # skip any account where this is False, so monitoring never runs against
+    # known-unconfigured credentials.
+    credentials_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    credentials_validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     user: Mapped["User"] = relationship("User", back_populates="cloud_provider_accounts")
     alert_threshold: Mapped["CloudAccountAlertThreshold | None"] = relationship(
         "CloudAccountAlertThreshold",

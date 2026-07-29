@@ -13,10 +13,12 @@ import type {
   CloudProviderAccountUpdate,
   CloudResource,
   CloudResourceList,
+  ConnectionTestResult,
   DeployResourceRequest,
   DestroyResourceRequest,
   PaginatedResponse,
   ResourceCategory,
+  TestConnectionRequest,
 } from "@/types";
 
 export interface ListCloudProviderAccountsParams {
@@ -50,6 +52,16 @@ export const cloudProviderAccountsApi = {
 
   remove: (accountId: number) =>
     httpClient.delete(`/cloud-provider-accounts/${accountId}`).then(() => undefined),
+
+  testConnection: (payload: TestConnectionRequest) =>
+    httpClient
+      .post<ConnectionTestResult>("/cloud-provider-accounts/test-connection", payload)
+      .then((r) => r.data),
+
+  validateCredentials: (accountId: number) =>
+    httpClient
+      .post<ConnectionTestResult>(`/cloud-provider-accounts/${accountId}/validate-credentials`)
+      .then((r) => r.data),
 
   listLinkedDeployments: (accountId: number) =>
     httpClient

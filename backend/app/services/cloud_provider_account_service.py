@@ -1,8 +1,12 @@
 """Business logic for a user's own cloud provider accounts (self-service
 only, same ownership pattern as NotificationService). No limit is enforced
 anywhere in this layer on how many accounts a single user may register."""
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
+from app.integrations.cloud_provider_client import ConnectionTestResult
+from app.integrations.provider_factory import get_cloud_provider_client
 from app.models.alert import Alert
 from app.models.cloud_provider_account import CloudProviderAccount
 from app.models.deployment import Deployment
@@ -13,7 +17,7 @@ from app.repositories.deployment_repository import DeploymentRepository
 from app.repositories.resource_usage_repository import ResourceUsageRepository
 from app.schemas.cloud_provider_account import CloudProviderAccountCreate, CloudProviderAccountUpdate
 from app.services.cloud_region_sync_service import load_available_regions
-from app.utils.crypto import encrypt_credentials
+from app.utils.crypto import decrypt_credentials, encrypt_credentials
 from app.utils.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
 
 ALL_REGIONS_SENTINEL = "all"
@@ -78,6 +82,10 @@ class CloudProviderAccountService:
             account.is_active = payload.is_active
         if payload.credentials is not None:
             account.credentials_encrypted = encrypt_credentials(payload.credentials)
+            # New credentials have never been proven to work - the old
+            # validation no longer applies to whatever was just typed in.
+            account.credentials_validated = False
+            account.credentials_validated_at = None
 
         self.db.commit()
         self.db.refresh(account)
@@ -86,6 +94,33 @@ class CloudProviderAccountService:
     def delete(self, account_id: int, current_user_id: int) -> None:
         account = self._get_owned_or_raise(account_id, current_user_id)
         self.repository.delete(account)
+
+    def test_connection(self, provider: str, region: str, credentials: dict) -> ConnectionTestResult:
+        """The Cloud Credential Configuration workflow's stateless
+        "Test Connection" step - a real, live call to the provider's own
+        API proving the given credentials work, before anything is ever
+        saved. Never touches the database."""
+        client = get_cloud_provider_client(provider, credentials, region)
+        return client.test_connection()
+
+    def validate_credentials(self, account_id: int, current_user_id: int) -> ConnectionTestResult:
+        """Re-validates an already-saved account's stored credentials with
+        a real, live call (never trusts a client-supplied "it passed" flag)
+        and, only on success, marks credentials_validated=True - the gate
+        that unblocks monitoring/resource-inventory/alerting for this
+        account (see CloudSyncService.sync_all/CloudRegionSyncService.
+        sync_all_regions, which both skip unvalidated accounts)."""
+        account = self._get_owned_or_raise(account_id, current_user_id)
+        credentials = decrypt_credentials(account.credentials_encrypted)
+        client = get_cloud_provider_client(account.provider, credentials, account.region)
+        result = client.test_connection()
+
+        account.credentials_validated = True
+        account.credentials_validated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        account.connection_status = "CONNECTED"
+        self.db.commit()
+        self.db.refresh(account)
+        return result
 
     def update_selected_region(
         self, account_id: int, current_user_id: int, selected_region: str

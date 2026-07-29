@@ -64,6 +64,30 @@ class CloudProviderAccountRead(CloudProviderAccountBase):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    # Phase 26: whether the stored credentials have actually been proven to
+    # work via a real test_connection() call - drives the frontend's
+    # "Cloud credentials are required before monitoring can begin" /
+    # "No cloud credentials configured" gating states.
+    credentials_validated: bool
+    credentials_validated_at: datetime | None = None
+
+
+class TestConnectionRequest(BaseModel):
+    """Stateless pre-save validation - never persists anything, purely a
+    real, live provider API call proving the given credentials work."""
+
+    provider: str = Field(..., min_length=2, max_length=30)
+    region: str = Field(..., min_length=1, max_length=50)
+    credentials: dict[str, str] = Field(..., min_length=1)
+
+
+class ConnectionTestResultRead(BaseModel):
+    provider: str
+    account_id: str | None = None
+    account_alias: str | None = None
+    principal: str | None = None
+    region: str
+    status: str
 
 
 class CloudAccountDeploymentSummary(BaseModel):

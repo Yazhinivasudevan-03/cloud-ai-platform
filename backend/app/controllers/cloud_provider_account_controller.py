@@ -9,9 +9,11 @@ from app.models.cloud_provider_account import CloudProviderAccount
 from app.schemas.alert import AlertRead
 from app.schemas.cloud_provider_account import (
     CloudAccountDeploymentSummary,
+    ConnectionTestResultRead,
     CloudProviderAccountCreate,
     CloudProviderAccountRead,
     CloudProviderAccountUpdate,
+    TestConnectionRequest,
 )
 from app.schemas.cloud_region import CloudAccountRegionsRead
 from app.schemas.cloud_resource import CloudResourceListRead, CloudResourceRead
@@ -42,6 +44,25 @@ class CloudProviderAccountController:
 
     def create(self, user_id: int, payload: CloudProviderAccountCreate) -> CloudProviderAccountRead:
         return CloudProviderAccountRead.model_validate(self.service.create(user_id, payload))
+
+    def test_connection(self, payload: TestConnectionRequest) -> ConnectionTestResultRead:
+        result = self.service.test_connection(payload.provider, payload.region, payload.credentials)
+        return ConnectionTestResultRead(**result)
+
+    def validate_credentials(self, account_id: int, current_user_id: int) -> ConnectionTestResultRead:
+        result = self.service.validate_credentials(account_id, current_user_id)
+        # Kicks off real monitoring immediately rather than waiting for the
+        # next scheduled sweep - a best-effort first region sync (the same
+        # real, live call "Refresh Regions" makes) so the newly-validated
+        # account's region list, resource inventory, and dashboard populate
+        # right away. Credentials are already proven valid by this point
+        # (test_connection succeeded above), so a hiccup in this bonus step
+        # must never fail the validate-credentials response itself.
+        try:
+            self.region_sync_service.sync_account(account_id, current_user_id)
+        except Exception:
+            pass
+        return ConnectionTestResultRead(**result)
 
     def list_for_user(
         self, user_id: int, provider: str | None, page: int, page_size: int

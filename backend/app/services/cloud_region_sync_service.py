@@ -104,7 +104,12 @@ class CloudRegionSyncService:
         expired) without aborting the rest, matching
         CloudSyncService.sync_all()'s own tolerance."""
         accounts: list[CloudProviderAccount] = list(
-            self.db.query(CloudProviderAccount).filter(CloudProviderAccount.is_active.is_(True)).all()
+            self.db.query(CloudProviderAccount)
+            .filter(
+                CloudProviderAccount.is_active.is_(True),
+                CloudProviderAccount.credentials_validated.is_(True),
+            )
+            .all()
         )
         synced = 0
         failed = 0

@@ -57,6 +57,22 @@ class MonthlyServiceCost(TypedDict):
     billing_period_end: date
 
 
+class ConnectionTestResult(TypedDict):
+    """Returned by test_connection() - a real, live proof that a credential
+    pair actually works, used both by the pre-save "Test Connection" button
+    and by the post-save validate-credentials call that flips
+    CloudProviderAccount.credentials_validated. account_alias/principal are
+    best-effort identity details (e.g. AWS IAM account alias/ARN) - None,
+    never fabricated, when the provider has no cheap way to supply one."""
+
+    provider: str
+    account_id: str | None
+    account_alias: str | None
+    principal: str | None
+    region: str
+    status: str
+
+
 class CloudProviderClient(ABC):
     """One instance is scoped to a single CloudProviderAccount's decrypted
     credentials + currently selected region, mirroring how every existing
@@ -133,3 +149,39 @@ class CloudProviderClient(ABC):
 
     def destroy(self, region: str, resource_type: str, resource_id: str) -> None:
         raise self._not_yet_supported("Provisioning")
+
+    def test_connection(self) -> ConnectionTestResult:
+        """Real, live proof this credential pair works, used by the
+        "Test Connection" button and the post-save validate-credentials
+        call. The default implementation reuses list_regions() (already a
+        real, classified-error network call per provider) as the
+        connectivity proof, then validates the configured region is one of
+        the ones actually discovered. AWS overrides this entirely with a
+        dedicated STS GetCallerIdentity call (the specific mechanism
+        requested for that provider); every other provider only overrides
+        _identity() below to supply account_id/account_alias/principal
+        alongside this same connectivity check."""
+        regions = self.list_regions()
+        region_ids = {r["id"] for r in regions}
+        if self.region != "all" and self.region not in region_ids:
+            raise ValidationAppError(
+                f"'{self.region}' is not a recognized region for {self.provider_name} - use one of "
+                f"{', '.join(sorted(region_ids))}",
+                code=f"{self.provider_name.upper()}_REGION_INVALID",
+            )
+        account_id, account_alias, principal = self._identity()
+        return {
+            "provider": self.provider_name,
+            "account_id": account_id,
+            "account_alias": account_alias,
+            "principal": principal,
+            "region": self.region,
+            "status": "success",
+        }
+
+    def _identity(self) -> tuple[str | None, str | None, str | None]:
+        """(account_id, account_alias, principal) - best-effort identity
+        details for the just-proven-working credentials. Returns all-None
+        by default (honestly disclosed, never fabricated) for a provider
+        that has no cheap way to supply one; overridden per provider below."""
+        return None, None, None

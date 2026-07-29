@@ -14,6 +14,11 @@ vi.mock("@/services/cloudProviderAccountsApi", () => ({
     create: vi.fn(),
     update: vi.fn(),
     createTimezone: vi.fn(),
+    testConnection: vi.fn(),
+    // Fire-and-forget auto-validation after a successful save (Phase 26) -
+    // resolves by default so its .catch(() => {}) never needs a real
+    // implementation in tests that don't care about it.
+    validateCredentials: vi.fn().mockResolvedValue({}),
   },
 }));
 
@@ -111,6 +116,8 @@ describe("CloudAccountFormDialog - Region selection", () => {
       is_active: true,
       created_at: "2026-01-01T00:00:00",
       updated_at: "2026-01-01T00:00:00",
+      credentials_validated: false,
+      credentials_validated_at: null,
     });
     vi.mocked(cloudProviderAccountsApi.createTimezone).mockResolvedValue({
       id: 1,
@@ -133,8 +140,8 @@ describe("CloudAccountFormDialog - Region selection", () => {
     await user.click(regionInput);
     await user.type(regionInput, "eu-west-2");
     await user.click(await screen.findByText("eu-west-2 — London, United Kingdom"));
-    await user.type(screen.getByPlaceholderText("e.g. access_key_id"), "access_key_id");
-    await user.type(screen.getByPlaceholderText("e.g. secret_access_key value"), "secret");
+    await user.type(screen.getByLabelText("AWS Access Key ID"), "access_key_id");
+    await user.type(screen.getByLabelText("AWS Secret Access Key"), "secret");
 
     await user.click(screen.getByRole("button", { name: "Add" }));
 

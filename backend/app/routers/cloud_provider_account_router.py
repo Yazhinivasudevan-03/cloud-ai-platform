@@ -27,9 +27,11 @@ from app.schemas.cloud_account_timezone import (
 )
 from app.schemas.cloud_provider_account import (
     CloudAccountDeploymentSummary,
+    ConnectionTestResultRead,
     CloudProviderAccountCreate,
     CloudProviderAccountRead,
     CloudProviderAccountUpdate,
+    TestConnectionRequest,
 )
 from app.schemas.cloud_region import CloudAccountRegionsRead, SelectRegionRequest
 from app.schemas.cloud_resource import (
@@ -56,6 +58,28 @@ def create_cloud_provider_account(
     current_user: User = Depends(get_current_active_user),
 ) -> CloudProviderAccountRead:
     return CloudProviderAccountController(db).create(current_user.id, payload)
+
+
+@router.post(
+    "/test-connection",
+    response_model=ConnectionTestResultRead,
+    summary=(
+        "Cloud Credential Configuration workflow's 'Test Connection' step - a real, live call to "
+        "the provider's own API proving the given credentials work, before anything is saved"
+    ),
+    responses={
+        422: {
+            "model": ErrorResponse,
+            "description": "Invalid access key, invalid secret key, access denied, invalid region, or a network error",
+        },
+    },
+)
+def test_cloud_provider_account_connection(
+    payload: TestConnectionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> ConnectionTestResultRead:
+    return CloudProviderAccountController(db).test_connection(payload)
 
 
 @router.get(
@@ -287,6 +311,32 @@ def delete_cloud_provider_account_timezone(
     current_user: User = Depends(get_current_active_user),
 ) -> None:
     CloudAccountTimezoneController(db).delete(account_id, timezone_id, current_user.id)
+
+
+@router.post(
+    "/{account_id}/validate-credentials",
+    response_model=ConnectionTestResultRead,
+    summary=(
+        "Re-validates one of the current user's own cloud provider accounts' already-saved "
+        "credentials with a real, live call and, only on success, marks credentials_validated=True "
+        "- the gate that unblocks monitoring/resource-inventory/alerting for this account. Also "
+        "kicks off an immediate best-effort region sync so monitoring begins right away"
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+        422: {
+            "model": ErrorResponse,
+            "description": "Invalid access key, invalid secret key, access denied, invalid region, or a network error",
+        },
+    },
+)
+def validate_cloud_provider_account_credentials(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> ConnectionTestResultRead:
+    return CloudProviderAccountController(db).validate_credentials(account_id, current_user.id)
 
 
 @router.get(

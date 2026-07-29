@@ -59,6 +59,12 @@ class CloudSyncService:
                 f"Cloud provider account {deployment.cloud_provider_account_id} not found",
                 code="CLOUD_ACCOUNT_NOT_FOUND",
             )
+        if not account.credentials_validated:
+            raise ValidationAppError(
+                "This cloud provider account's credentials have not been validated yet - "
+                "configure and test them before monitoring can begin",
+                code="CLOUD_CREDENTIALS_NOT_VALIDATED",
+            )
 
         fetcher = _PROVIDER_FETCHERS.get(account.provider)
         if fetcher is None:

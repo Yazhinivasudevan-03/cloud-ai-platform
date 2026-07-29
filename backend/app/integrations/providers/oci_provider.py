@@ -166,6 +166,20 @@ class OciCloudProviderClient(CloudProviderClient):
             )
         return regions
 
+    def _identity(self) -> tuple[str | None, str | None, str | None]:
+        # Best-effort only - the base class's test_connection() has already
+        # proven the credentials work via a real list_regions() call by the
+        # time this runs; a failure to fetch the tenancy's display name here
+        # must never fail an otherwise-successful connection test.
+        tenancy_id = self.credentials.get("tenancy")
+        account_alias = None
+        try:
+            client = oci.identity.IdentityClient(self._config())
+            account_alias = client.get_tenancy(tenancy_id).data.name
+        except ServiceError:
+            pass
+        return tenancy_id, account_alias, self.credentials.get("user")
+
     def list_monitoring(self, resource_id: str, lookback_minutes: int) -> InstanceResourceUsage:
         """Queries real OCI Monitoring (via MQL) for a single Compute
         instance's CPU/network over the last `lookback_minutes`. `resource_id`

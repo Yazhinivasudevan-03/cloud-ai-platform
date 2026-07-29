@@ -19,6 +19,7 @@ from app.integrations.cloud_provider_client import (
     CloudProviderClient,
     CloudRegionInfo,
     CloudResourceSummary,
+    ConnectionTestResult,
     MonthlyServiceCost,
     ResourceUsageSnapshot,
 )
@@ -117,6 +118,35 @@ def _classify_aws_region_error(exc: BaseException) -> tuple[str, str]:
     return "AWS_REGION_NETWORK_UNREACHABLE", f"Could not reach AWS to discover regions: {exc}"
 
 
+# Phase 26: the Cloud Credential Configuration workflow's "Test Connection"
+# step validates a *credential pair itself* (STS GetCallerIdentity), a
+# different failure surface than region discovery - AWS's real Error.Code
+# distinguishes a bad access key from a bad secret key from a valid-but-
+# unauthorized pair, so the "Test Connection" UI can show the user the
+# exact reason rather than one generic message.
+_AWS_SESSION_TOKEN_EXPIRED_CODES = {"ExpiredToken", "ExpiredTokenException", "RequestExpired"}
+
+
+def _classify_aws_credential_test_error(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, botocore.exceptions.ClientError):
+        error_code = exc.response.get("Error", {}).get("Code", "Unknown")
+        message = exc.response.get("Error", {}).get("Message", str(exc))
+        if error_code == "InvalidClientTokenId":
+            return "AWS_INVALID_ACCESS_KEY", "The AWS Access Key ID provided does not exist or is invalid."
+        if error_code == "SignatureDoesNotMatch":
+            return "AWS_INVALID_SECRET_KEY", "The AWS Secret Access Key provided is incorrect."
+        if error_code in _AWS_SESSION_TOKEN_EXPIRED_CODES:
+            return "AWS_SESSION_TOKEN_EXPIRED", "The provided AWS session token has expired."
+        if error_code in _AWS_ACCESS_DENIED_CODES:
+            return (
+                "AWS_ACCESS_DENIED",
+                "Access denied - this credential pair is valid but lacks permission to verify its own "
+                "identity (sts:GetCallerIdentity).",
+            )
+        return "AWS_CREDENTIAL_TEST_FAILED", f"AWS rejected the credentials ({error_code}): {message}"
+    return "AWS_NETWORK_ERROR", f"Could not reach AWS - check your network connection ({exc})"
+
+
 class AwsCloudProviderClient(CloudProviderClient):
     @property
     def provider_name(self) -> str:
@@ -185,6 +215,58 @@ class AwsCloudProviderClient(CloudProviderClient):
                 code="AWS_IDENTITY_REQUEST_FAILED",
             ) from exc
         return [identity["Account"]]
+
+    def test_connection(self) -> ConnectionTestResult:
+        """The Cloud Credential Configuration workflow's "Test Connection"
+        step - a real, live STS GetCallerIdentity call (the specific
+        mechanism requested for AWS), then a real region-validity check
+        against a live DescribeRegions call. Never persists anything -
+        purely a read."""
+        self.authenticate()
+        sts_client = boto3.client("sts", **self._client_kwargs())
+        try:
+            identity = sts_client.get_caller_identity()
+        except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError) as exc:
+            code, message = _classify_aws_credential_test_error(exc)
+            raise ValidationAppError(message, code=code) from exc
+
+        region = self.region if self.region and self.region != "all" else "us-east-1"
+        # Deliberately queried from the stable "us-east-1" endpoint, not
+        # self.region - DescribeRegions is the authoritative list of every
+        # valid region, so the client fetching it must not itself be scoped
+        # to a possibly-invalid target region (which would fail to even
+        # construct a request before this validity check could run).
+        ec2_client = boto3.client("ec2", **self._client_kwargs_for("us-east-1"))
+        try:
+            response = ec2_client.describe_regions(AllRegions=False)
+        except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError) as exc:
+            code, message = _classify_aws_region_error(exc)
+            raise ValidationAppError(message, code=code) from exc
+        region_ids = {entry["RegionName"] for entry in response.get("Regions", [])}
+        if self.region != "all" and self.region not in region_ids:
+            raise ValidationAppError(
+                f"'{self.region}' is not a recognized AWS region.", code="AWS_REGION_INVALID"
+            )
+
+        # Best-effort only - a typical least-privilege IAM user has no
+        # iam:ListAccountAliases permission at all, and that must never
+        # fail an otherwise-successful connection test.
+        account_alias = None
+        try:
+            iam_client = boto3.client("iam", **self._client_kwargs())
+            aliases = iam_client.list_account_aliases().get("AccountAliases", [])
+            account_alias = aliases[0] if aliases else None
+        except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError):
+            pass
+
+        return {
+            "provider": "aws",
+            "account_id": identity["Account"],
+            "account_alias": account_alias,
+            "principal": identity["Arn"],
+            "region": region,
+            "status": "success",
+        }
 
     def list_monitoring(self, resource_id: str, lookback_minutes: int) -> ResourceUsageSnapshot:
         return fetch_ec2_resource_usage(self.credentials, self.region, resource_id, lookback_minutes)  # type: ignore[return-value]
