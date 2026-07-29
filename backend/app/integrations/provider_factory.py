@@ -10,15 +10,19 @@ codebase changes, proving the "pluggable without changing existing code"
 requirement.
 """
 from app.integrations.cloud_provider_client import CloudProviderClient
+from app.integrations.providers.alibaba_provider import AlibabaCloudProviderClient
 from app.integrations.providers.aws_provider import AwsCloudProviderClient
 from app.integrations.providers.azure_provider import AzureCloudProviderClient
 from app.integrations.providers.gcp_provider import GcpCloudProviderClient
+from app.integrations.providers.oci_provider import OciCloudProviderClient
 from app.utils.exceptions import ValidationAppError
 
 _PROVIDER_CLIENTS: dict[str, type[CloudProviderClient]] = {
     "aws": AwsCloudProviderClient,
     "azure": AzureCloudProviderClient,
     "gcp": GcpCloudProviderClient,
+    "oci": OciCloudProviderClient,
+    "alibaba": AlibabaCloudProviderClient,
 }
 
 

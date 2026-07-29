@@ -154,8 +154,8 @@ def test_gcp_list_regions_wraps_permission_denied(mock_client_cls, _mock_service
 # --- provider_factory -------------------------------------------------------
 
 
-def test_provider_factory_supports_aws_azure_gcp():
-    assert supported_providers() == ["aws", "azure", "gcp"]
+def test_provider_factory_supports_every_registered_provider():
+    assert supported_providers() == ["alibaba", "aws", "azure", "gcp", "oci"]
 
 
 def test_provider_factory_rejects_unknown_provider():
