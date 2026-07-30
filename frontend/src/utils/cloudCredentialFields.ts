@@ -1,13 +1,12 @@
-// Phase 26: the Cloud Credential Configuration workflow's per-provider
+// Phase 26/27: the Cloud Credential Configuration workflow's per-provider
 // structured credential fields - one small, explicit config per provider
 // that already has a real backend CloudProviderClient adapter (see
 // backend/app/integrations/providers/), so "Test Connection" performs a
-// genuine, live validation call rather than a fabricated success. IBM
-// Cloud/DigitalOcean/"Other" have no backend adapter at all yet (still
-// UI-only "connect" since Phase 24) and fall back to the existing generic
-// key/value credential editor, with an honest note that live validation
-// isn't available for them yet - never a fake "Test Connection" that
-// doesn't actually call anything real.
+// genuine, live validation call rather than a fabricated success. Only
+// "Other" (a free-text custom provider name) has no backend adapter and
+// falls back to the existing generic key/value credential editor, with an
+// honest note that live validation isn't available for it - never a fake
+// "Test Connection" that doesn't actually call anything real.
 export interface CredentialFieldConfig {
   key: string;
   label: string;
@@ -56,6 +55,39 @@ export const PROVIDER_CREDENTIAL_FIELDS: Record<string, CredentialFieldConfig[]>
     { key: "access_key_id", label: "AccessKey ID", type: "text", required: true },
     { key: "access_key_secret", label: "AccessKey Secret", type: "password", required: true },
   ],
+  ibm: [
+    { key: "api_key", label: "IAM API Key", type: "password", required: true },
+    {
+      key: "resource_group_id",
+      label: "Resource Group ID (optional)",
+      type: "text",
+      required: false,
+      helperText: "Required only for deploying new resources - not needed to browse/monitor existing ones",
+    },
+    {
+      key: "cos_instance_crn",
+      label: "Cloud Object Storage instance CRN (optional)",
+      type: "text",
+      required: false,
+      helperText: "Required only to list/create/delete storage buckets",
+    },
+  ],
+  digitalocean: [
+    { key: "api_token", label: "Personal Access Token", type: "password", required: true },
+    {
+      key: "spaces_access_key_id",
+      label: "Spaces Access Key ID (optional)",
+      type: "text",
+      required: false,
+      helperText: "A separate key pair from the access token - required only for Spaces storage",
+    },
+    {
+      key: "spaces_secret_access_key",
+      label: "Spaces Secret Access Key (optional)",
+      type: "password",
+      required: false,
+    },
+  ],
 };
 
 // Providers with a real backend adapter capable of a genuine Test
@@ -74,6 +106,8 @@ const ACCOUNT_ALIAS_LABELS: Record<string, string> = {
   gcp: "Project Alias (optional)",
   oci: "Tenancy Alias (optional)",
   alibaba: "Account Alias (optional)",
+  ibm: "Account Alias (optional)",
+  digitalocean: "Account Alias (optional)",
 };
 
 export function accountAliasLabel(provider: string): string {

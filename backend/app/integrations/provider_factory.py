@@ -13,7 +13,9 @@ from app.integrations.cloud_provider_client import CloudProviderClient
 from app.integrations.providers.alibaba_provider import AlibabaCloudProviderClient
 from app.integrations.providers.aws_provider import AwsCloudProviderClient
 from app.integrations.providers.azure_provider import AzureCloudProviderClient
+from app.integrations.providers.digitalocean_provider import DigitalOceanCloudProviderClient
 from app.integrations.providers.gcp_provider import GcpCloudProviderClient
+from app.integrations.providers.ibm_provider import IbmCloudProviderClient
 from app.integrations.providers.oci_provider import OciCloudProviderClient
 from app.utils.exceptions import ValidationAppError
 
@@ -23,6 +25,8 @@ _PROVIDER_CLIENTS: dict[str, type[CloudProviderClient]] = {
     "gcp": GcpCloudProviderClient,
     "oci": OciCloudProviderClient,
     "alibaba": AlibabaCloudProviderClient,
+    "ibm": IbmCloudProviderClient,
+    "digitalocean": DigitalOceanCloudProviderClient,
 }
 
 

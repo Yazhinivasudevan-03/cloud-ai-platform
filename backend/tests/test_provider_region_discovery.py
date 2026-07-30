@@ -326,7 +326,7 @@ def test_gcp_list_regions_reports_no_regions_returned(mock_client_cls, _mock_ser
 
 
 def test_provider_factory_supports_every_registered_provider():
-    assert supported_providers() == ["alibaba", "aws", "azure", "gcp", "oci"]
+    assert supported_providers() == ["alibaba", "aws", "azure", "digitalocean", "gcp", "ibm", "oci"]
 
 
 def test_provider_factory_rejects_unknown_provider():

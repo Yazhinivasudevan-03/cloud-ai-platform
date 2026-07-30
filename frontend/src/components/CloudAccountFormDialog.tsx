@@ -342,11 +342,10 @@ export function CloudAccountFormDialog({
             </>
           ) : (
             <>
-              {(provider === "ibm" || provider === "digitalocean") && (
+              {provider === "other" && (
                 <Typography variant="caption" color="text.secondary">
-                  Live connection testing isn't available for this provider yet - credentials are still
-                  saved encrypted, but "Test Connection" can't verify them against a real API in this
-                  pass.
+                  Live connection testing isn't available for a custom provider - credentials are
+                  still saved encrypted, but "Test Connection" can't verify them against a real API.
                 </Typography>
               )}
               {credentialFields.map((field, index) => (
