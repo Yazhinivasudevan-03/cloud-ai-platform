@@ -107,8 +107,13 @@ services:
     image: prom/node-exporter:v1.8.2
     container_name: cloud-ai-node-exporter
     restart: unless-stopped
-    ports:
-      - "9100:9100"
+    # No host port publish: Prometheus scrapes this over the internal
+    # cloud-ai-network at node-exporter:9100, which needs no host port at
+    # all. Docker Desktop's built-in Kubernetes cluster runs its own
+    # node-exporter DaemonSet with hostNetwork+hostPort 9100 on the same
+    # node, so publishing 9100 here collides with it and aborts `docker
+    # compose up` for the whole stack before later services (grafana) can
+    # even start.
     networks:
       - cloud-ai-network
 
