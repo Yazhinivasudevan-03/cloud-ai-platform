@@ -35,7 +35,11 @@ from app.integrations.cloud_provider_client import (
     CloudProviderClient,
     CloudRegionInfo,
     CloudResourceSummary,
+    MonthlyServiceCost,
+    ResourceUsageSnapshot,
 )
+from app.integrations.digitalocean_billing import fetch_monthly_costs_by_service as fetch_do_monthly_costs
+from app.integrations.digitalocean_monitoring import fetch_droplet_resource_usage
 from app.utils.exceptions import ValidationAppError
 
 # The one, fixed, smallest Droplet size slug deploy() will ever request -
@@ -151,6 +155,12 @@ class DigitalOceanCloudProviderClient(CloudProviderClient):
             return account.get("uuid"), None, account.get("email")
         except HttpResponseError:
             return None, None, None
+
+    def list_monitoring(self, resource_id: str, lookback_minutes: int) -> ResourceUsageSnapshot:
+        return fetch_droplet_resource_usage(self.credentials, self.region, resource_id, lookback_minutes)  # type: ignore[return-value]
+
+    def list_costs(self, months: int) -> list[MonthlyServiceCost]:
+        return fetch_do_monthly_costs(self.credentials, months)
 
     def _wrap_http_error(self, exc: HttpResponseError, code: str) -> ValidationAppError:
         return ValidationAppError(f"DigitalOcean rejected the request: {exc.message or exc}", code=code)

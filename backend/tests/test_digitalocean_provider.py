@@ -286,3 +286,28 @@ def test_deploy_and_destroy_networking(mock_client_cls):
 
     client.destroy("nyc1", "networking", result["id"])
     mock_client_cls.return_value.vpcs.delete.assert_called_once_with(vpc_id="vpc-1")
+
+
+# --- list_monitoring / list_costs (Phase 28) --------------------------------
+
+
+@patch("app.integrations.providers.digitalocean_provider.fetch_droplet_resource_usage")
+def test_list_monitoring_delegates_to_the_droplet_metrics_fetcher(mock_fetch):
+    mock_fetch.return_value = {"cpu_usage_percent": 12.5}
+    client = DigitalOceanCloudProviderClient(CREDENTIALS, "nyc1")
+
+    result = client.list_monitoring("123", lookback_minutes=15)
+
+    mock_fetch.assert_called_once_with(CREDENTIALS, "nyc1", "123", 15)
+    assert result == mock_fetch.return_value
+
+
+@patch("app.integrations.providers.digitalocean_provider.fetch_do_monthly_costs")
+def test_list_costs_delegates_to_the_billing_fetcher(mock_fetch):
+    mock_fetch.return_value = [{"service_name": "Droplets", "cost_amount": 20.0, "currency": "USD"}]
+    client = DigitalOceanCloudProviderClient(CREDENTIALS, "nyc1")
+
+    result = client.list_costs(3)
+
+    mock_fetch.assert_called_once_with(CREDENTIALS, 3)
+    assert result == mock_fetch.return_value

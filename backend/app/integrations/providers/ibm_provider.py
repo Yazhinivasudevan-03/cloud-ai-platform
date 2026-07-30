@@ -42,7 +42,10 @@ from app.integrations.cloud_provider_client import (
     CloudProviderClient,
     CloudRegionInfo,
     CloudResourceSummary,
+    MonthlyServiceCost,
+    ResourceUsageSnapshot,
 )
+from app.integrations.ibm_usage_reports import fetch_monthly_costs_by_service as fetch_ibm_monthly_costs
 from app.utils.exceptions import ValidationAppError
 
 # IBM VPC's list_regions() returns only region slugs (e.g. "us-south"),
@@ -187,6 +190,25 @@ class IbmCloudProviderClient(CloudProviderClient):
 
     def _wrap_api_exception(self, exc: ApiException, code: str) -> ValidationAppError:
         return ValidationAppError(f"IBM Cloud rejected the request ({exc.status_code}): {exc.message}", code=code)
+
+    def list_monitoring(self, resource_id: str, lookback_minutes: int) -> ResourceUsageSnapshot:
+        # Deliberately not implemented (Phase 28) - IBM Cloud Monitoring is
+        # a separate Sysdig-based product requiring a per-instance agent
+        # this platform cannot install on the caller's behalf, and IBM
+        # publishes no official Python SDK for its query API either
+        # (unlike AWS CloudWatch/Azure Monitor/GCP Cloud Monitoring/
+        # DigitalOcean's droplet metrics, all real integrations elsewhere
+        # in this platform). Disclosed honestly rather than hand-rolling an
+        # unverifiable HTTP integration - see docs/PHASE_28.md.
+        raise ValidationAppError(
+            "IBM Cloud Monitoring requires a separate Sysdig-based monitoring instance and an agent "
+            "installed on each VPC instance to emit host-level metrics, and has no official Python SDK "
+            "for its query API - real-time metrics sync is not implemented for IBM Cloud in this pass",
+            code="IBM_MONITORING_NOT_YET_SUPPORTED",
+        )
+
+    def list_costs(self, months: int) -> list[MonthlyServiceCost]:
+        return fetch_ibm_monthly_costs(self.credentials, months)
 
     def list_resources(self, region: str) -> list[CloudResourceSummary]:
         client = self._vpc_client_for(region)

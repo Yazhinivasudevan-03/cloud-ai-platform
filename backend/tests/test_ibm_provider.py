@@ -333,3 +333,26 @@ def test_deploy_and_destroy_networking(mock_client_cls):
 
     client.destroy("us-south", "networking", result["id"])
     mock_client_cls.return_value.delete_vpc.assert_called_once_with(id="vpc-1")
+
+
+# --- list_monitoring / list_costs (Phase 28) --------------------------------
+
+
+def test_list_monitoring_is_disclosed_as_not_yet_supported():
+    client = IbmCloudProviderClient(CREDENTIALS, "us-south")
+    with pytest.raises(ValidationAppError) as exc_info:
+        client.list_monitoring("instance-1", lookback_minutes=15)
+    assert exc_info.value.code == "IBM_MONITORING_NOT_YET_SUPPORTED"
+
+
+@patch("app.integrations.providers.ibm_provider.fetch_ibm_monthly_costs")
+def test_list_costs_delegates_to_the_usage_reports_fetcher(mock_fetch):
+    mock_fetch.return_value = [
+        {"service_name": "Virtual Server for VPC", "cost_amount": 10.0, "currency": "USD"}
+    ]
+    client = IbmCloudProviderClient(CREDENTIALS, "us-south")
+
+    result = client.list_costs(3)
+
+    mock_fetch.assert_called_once_with(CREDENTIALS, 3)
+    assert result == mock_fetch.return_value

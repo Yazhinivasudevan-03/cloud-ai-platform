@@ -6,7 +6,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 
 ## Project status
 
-**All 27 phases complete.** Built phase by phase - see [`docs/`](docs/) for a detailed, honestly-verified report for each phase.
+**All 28 phases complete.** Built phase by phase - see [`docs/`](docs/) for a detailed, honestly-verified report for each phase.
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -37,6 +37,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 | 25 | Dynamic multi-cloud region discovery (live, provider-discovered region lists for AWS/Azure/GCP/Oracle Cloud/Alibaba Cloud, replacing any hardcoded region data), a full read-only resource inventory (compute/clusters/databases/storage/networking, 25 real read paths), and real deploy/destroy provisioning (compute/storage/networking, confirm-to-destroy + full audit trail, fixed free-tier-eligible instance sizes) - all behind one provider-agnostic adapter interface, built and committed across 6 independently-verified sub-phases (25A-25F) | **Complete** - see [`docs/PHASE_25.md`](docs/PHASE_25.md) |
 | 26 | Cloud Credential Configuration workflow: replaced raw backend error messages with structured, provider-specific credential forms, a real live "Test Connection" step (genuine STS GetCallerIdentity for AWS), and a `credentials_validated` gate that blocks monitoring/resource-inventory/alerting until credentials are actually proven to work, with a "Configure Credentials" empty-state on the Dashboard and Cloud Account detail page | **Complete** - see [`docs/PHASE_26.md`](docs/PHASE_26.md) |
 | 27 | Real backend integrations for IBM Cloud and DigitalOcean (previously UI-only "connect" buttons since Phase 24) - credential validation, live region discovery, the full 5-category resource inventory, and compute/storage/networking provisioning, matching every other provider's capability surface; live verification against the real IBM Cloud IAM API caught and fixed a genuine discrepancy (invalid API keys reject with HTTP 400, not 401) | **Complete** - see [`docs/PHASE_27.md`](docs/PHASE_27.md) |
+| 28 | Real-time metrics + billing sync for IBM Cloud and DigitalOcean - DigitalOcean gets real Droplet CPU/memory/disk/network metrics (genuinely agent-free, unlike every other provider) and real invoice-based billing sync; IBM Cloud gets real Usage Reports billing sync, with Cloud Monitoring (metrics) explicitly disclosed as not-yet-supported (a separate Sysdig-based product with no official Python SDK) rather than faked | **Complete** - see [`docs/PHASE_28.md`](docs/PHASE_28.md) |
 
 ## Known limitations (honestly disclosed, not glossed over)
 

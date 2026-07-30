@@ -8,6 +8,10 @@ from app.integrations.aws_cost_explorer import fetch_monthly_costs_by_service as
 from app.integrations.azure_cost_management import (
     fetch_monthly_costs_by_service as fetch_azure_costs,
 )
+from app.integrations.digitalocean_billing import (
+    fetch_monthly_costs_by_service as fetch_digitalocean_costs,
+)
+from app.integrations.ibm_usage_reports import fetch_monthly_costs_by_service as fetch_ibm_costs
 from app.models.cloud_cost import CloudCost
 from app.models.user import User
 from app.optimization.cost_forecaster import CostForecast, forecast_next_month
@@ -19,19 +23,23 @@ from app.utils.crypto import decrypt_credentials
 from app.utils.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 from app.utils.ownership import raise_if_cannot_access_project
 
-# AWS and Azure are wired to real billing integrations (see
-# app/integrations/aws_cost_explorer.py, azure_cost_management.py). GCP is
-# deliberately not included: unlike AWS/Azure, GCP has no generalizable
-# "give me my spend by service" API callable with just account credentials
-# - it requires the customer to have already set up BigQuery billing
-# export to a dataset only they control, which this platform can't assume
-# or configure on their behalf. GCP cost sync therefore still reports the
-# same honest CLOUD_SYNC_PROVIDER_NOT_SUPPORTED error below rather than
-# faking a fragile integration - see app/integrations/gcp_monitoring.py's
-# module docstring for the same disclosure on the metrics side.
+# AWS, Azure, IBM Cloud, and DigitalOcean are wired to real billing
+# integrations (see app/integrations/aws_cost_explorer.py,
+# azure_cost_management.py, ibm_usage_reports.py, digitalocean_billing.py).
+# GCP is deliberately not included: unlike the others, GCP has no
+# generalizable "give me my spend by service" API callable with just
+# account credentials - it requires the customer to have already set up
+# BigQuery billing export to a dataset only they control, which this
+# platform can't assume or configure on their behalf. GCP cost sync
+# therefore still reports the same honest COST_SYNC_PROVIDER_NOT_SUPPORTED
+# error below rather than faking a fragile integration - see
+# app/integrations/gcp_monitoring.py's module docstring for the same
+# disclosure on the metrics side.
 _PROVIDER_COST_FETCHERS = {
     "aws": fetch_aws_costs,
     "azure": fetch_azure_costs,
+    "ibm": fetch_ibm_costs,
+    "digitalocean": fetch_digitalocean_costs,
 }
 
 

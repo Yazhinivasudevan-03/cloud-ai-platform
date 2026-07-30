@@ -124,6 +124,67 @@ def test_sync_cloud_metrics_writes_real_resource_usage(client, make_user_with_ro
     assert items[0]["cpu_usage_percent"] == 55.0
 
 
+def test_sync_cloud_metrics_writes_real_resource_usage_for_digitalocean(client, make_user_with_role, db_session):
+    """DigitalOcean has no moto-equivalent emulator, so this patches the
+    real `pydo` monitoring client directly (Phase 28) - the same pattern
+    already established for test_digitalocean_monitoring.py."""
+    from unittest.mock import patch
+
+    token = make_user_with_role("cloud_sync_op_do", "operator")
+    me = client.get("/api/v1/auth/me", headers=_auth_header(token)).json()
+    # _make_cloud_account always encrypts AWS-shaped credentials regardless
+    # of `provider` (deliberately - test_sync_all_tolerates_individual_failures
+    # relies on that mismatch to simulate a broken GCP account), so a real
+    # DigitalOcean success path needs its own account with real DO
+    # credentials instead.
+    account = CloudProviderAccount(
+        user_id=me["id"],
+        provider="digitalocean",
+        account_name=f"test-digitalocean-{me['id']}",
+        region="nyc1",
+        credentials_encrypted=encrypt_credentials({"api_token": "fake-token"}),
+        credentials_validated=True,
+    )
+    db_session.add(account)
+    db_session.commit()
+    db_session.refresh(account)
+    deployment = _make_deployment(client, token, "do")
+
+    client.put(
+        f"/api/v1/deployments/{deployment['id']}",
+        json={"cloud_provider_account_id": account.id, "cloud_resource_identifier": "123"},
+        headers=_auth_header(token),
+    )
+
+    def _matrix(value: float) -> dict:
+        return {"data": {"result": [{"metric": {}, "values": [["1700000000", str(value)]]}]}}
+
+    with patch("app.integrations.digitalocean_monitoring.pydo.Client") as mock_client_cls:
+        monitoring = mock_client_cls.return_value.monitoring
+        monitoring.get_droplet_cpu_metrics.return_value = {
+            "data": {"result": [{"metric": {"mode": "idle"}, "values": [["1700000000", "70.0"]]}]}
+        }
+        monitoring.get_droplet_memory_total_metrics.return_value = _matrix(1_073_741_824)
+        monitoring.get_droplet_memory_available_metrics.return_value = _matrix(536_870_912)
+        monitoring.get_droplet_filesystem_size_metrics.return_value = _matrix(0)
+        monitoring.get_droplet_filesystem_free_metrics.return_value = _matrix(0)
+        monitoring.get_droplet_bandwidth_metrics.return_value = _matrix(1.0)
+
+        sync_resp = client.post(
+            f"/api/v1/deployments/{deployment['id']}/sync-cloud-metrics", headers=_auth_header(token)
+        )
+
+    assert sync_resp.status_code == 200
+    assert sync_resp.json()["provider"] == "digitalocean"
+
+    usage_resp = client.get(
+        f"/api/v1/deployments/{deployment['id']}/resource-usage", headers=_auth_header(token)
+    )
+    items = usage_resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["cpu_usage_percent"] == 30.0  # 100 - idle(70)
+
+
 def test_sync_fails_clearly_when_deployment_has_no_cloud_link(client, make_user_with_role):
     token = make_user_with_role("cloud_sync_op_b", "operator")
     deployment = _make_deployment(client, token, "b")

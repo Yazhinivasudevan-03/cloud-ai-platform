@@ -2,7 +2,14 @@
 audit roadmap item 9) - exercises the full real path: project + linked
 cloud account -> real boto3 Cost Explorer call (via moto) -> CloudCost
 rows, through the actual HTTP API. See test_aws_cost_explorer.py for
-moto's Cost Explorer emulation limitation (no way to seed cost data)."""
+moto's Cost Explorer emulation limitation (no way to seed cost data).
+
+The IBM Cloud/DigitalOcean tests below (Phase 28) patch their real SDK
+clients directly instead - no moto-equivalent emulator exists for either
+(same disclosed limitation as everywhere else these two providers are
+tested in this project)."""
+from unittest.mock import MagicMock, patch
+
 from moto import mock_aws
 
 from app.models.cloud_provider_account import CloudProviderAccount
@@ -155,3 +162,78 @@ def test_repeated_sync_does_not_duplicate_already_stored_months(
 
     all_costs = CloudCostService(db_session).repository.list_all_for_project(project["id"])
     assert len(all_costs) == 1
+
+
+def _detailed_response(result: dict) -> MagicMock:
+    response = MagicMock()
+    response.get_result.return_value = result
+    return response
+
+
+@patch("app.integrations.ibm_usage_reports.ibm_platform_services.UsageReportsV4")
+@patch("app.integrations.ibm_usage_reports.ibm_platform_services.IamIdentityV1")
+def test_sync_project_cloud_costs_succeeds_for_ibm(mock_iam_cls, mock_usage_cls, client, make_user_with_role, db_session):
+    mock_iam_cls.return_value.get_api_keys_details.return_value = _detailed_response(
+        {"account_id": "fake-account-id"}
+    )
+    mock_usage_cls.return_value.get_account_usage.return_value = _detailed_response(
+        {"currency_code": "USD", "resources": [{"resource_id": "is.instance", "resource_name": "Virtual Server for VPC", "billable_cost": 42.5}]}
+    )
+    token = make_user_with_role("cost_sync_op_ibm", "operator")
+    me = client.get("/api/v1/auth/me", headers=_auth_header(token)).json()
+    # _make_cloud_account always encrypts AWS-shaped credentials regardless
+    # of `provider` - a real IBM success path needs its own account with
+    # real IBM credentials instead.
+    account = CloudProviderAccount(
+        user_id=me["id"],
+        provider="ibm",
+        account_name=f"cost-test-ibm-{me['id']}",
+        region="us-south",
+        credentials_encrypted=encrypt_credentials({"api_key": "fake-api-key"}),
+    )
+    db_session.add(account)
+    db_session.commit()
+    db_session.refresh(account)
+    project = _make_project(client, token, "ibm")
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/cloud-costs/sync",
+        params={"cloud_provider_account_id": account.id},
+        headers=_auth_header(token),
+    )
+    assert response.status_code == 201
+    assert response.json()[0]["service_name"] == "Virtual Server for VPC"
+
+
+@patch("app.integrations.digitalocean_billing.pydo.Client")
+def test_sync_project_cloud_costs_succeeds_for_digitalocean(mock_client_cls, client, make_user_with_role, db_session):
+    mock_client_cls.return_value.invoices.list.return_value = {
+        "invoices": [{"invoice_uuid": "uuid-1", "invoice_period": "2026-06"}]
+    }
+    mock_client_cls.return_value.invoices.get_by_uuid.return_value = {
+        "invoice_items": [{"product": "Droplets", "amount": "20.00"}]
+    }
+    token = make_user_with_role("cost_sync_op_do", "operator")
+    me = client.get("/api/v1/auth/me", headers=_auth_header(token)).json()
+    # _make_cloud_account always encrypts AWS-shaped credentials regardless
+    # of `provider` - a real DigitalOcean success path needs its own
+    # account with real DO credentials instead.
+    account = CloudProviderAccount(
+        user_id=me["id"],
+        provider="digitalocean",
+        account_name=f"cost-test-digitalocean-{me['id']}",
+        region="nyc1",
+        credentials_encrypted=encrypt_credentials({"api_token": "fake-token"}),
+    )
+    db_session.add(account)
+    db_session.commit()
+    db_session.refresh(account)
+    project = _make_project(client, token, "do")
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/cloud-costs/sync",
+        params={"cloud_provider_account_id": account.id},
+        headers=_auth_header(token),
+    )
+    assert response.status_code == 201
+    assert response.json()[0]["service_name"] == "Droplets"

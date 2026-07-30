@@ -2,10 +2,15 @@
 cloud provider account, replacing manually-posted/synthetic resource_usage
 data with genuine cloud provider metrics (Phase 12).
 
-"aws", "azure" and "gcp" are wired to real integrations (see
-app/integrations/aws_cloudwatch.py, azure_monitor.py, gcp_monitoring.py) -
-any other provider value raises a clear, honest
-CLOUD_SYNC_PROVIDER_NOT_SUPPORTED error rather than silently doing nothing.
+"aws", "azure", "gcp" and "digitalocean" are wired to real integrations (see
+app/integrations/aws_cloudwatch.py, azure_monitor.py, gcp_monitoring.py,
+digitalocean_monitoring.py) - any other provider value raises a clear,
+honest CLOUD_SYNC_PROVIDER_NOT_SUPPORTED error rather than silently doing
+nothing. "oci"/"alibaba" have real resource-inventory/provisioning
+integrations (Phase 25) but not real-time metrics sync; "ibm" has real
+cost sync (Phase 28) but not metrics - see IbmCloudProviderClient.
+list_monitoring()'s own disclosure (a separate Sysdig-based product with
+no official Python SDK, unlike every provider actually wired in here).
 """
 from datetime import datetime, timezone
 
@@ -14,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.config.settings import get_settings
 from app.integrations.aws_cloudwatch import fetch_ec2_resource_usage
 from app.integrations.azure_monitor import fetch_vm_resource_usage
+from app.integrations.digitalocean_monitoring import fetch_droplet_resource_usage
 from app.integrations.gcp_monitoring import fetch_instance_resource_usage
 from app.models.deployment import Deployment
 from app.models.resource_usage import ResourceUsage
@@ -31,6 +37,7 @@ _PROVIDER_FETCHERS = {
     "aws": fetch_ec2_resource_usage,
     "azure": fetch_vm_resource_usage,
     "gcp": fetch_instance_resource_usage,
+    "digitalocean": fetch_droplet_resource_usage,
 }
 
 
