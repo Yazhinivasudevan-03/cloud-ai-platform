@@ -46,24 +46,13 @@ from app.integrations.cloud_provider_client import (
     ResourceUsageSnapshot,
 )
 from app.integrations.ibm_usage_reports import fetch_monthly_costs_by_service as fetch_ibm_monthly_costs
+from app.integrations import region_metadata
 from app.utils.exceptions import ValidationAppError
 
 # IBM VPC's list_regions() returns only region slugs (e.g. "us-south"),
-# never a human-readable display name - same presentation-only lookup
-# pattern as aws_provider.py/gcp_provider.py/oci_provider.py, falling back
-# to the raw slug for anything unmapped.
-_IBM_REGION_DISPLAY_NAMES = {
-    "us-south": "US South (Dallas)",
-    "us-east": "US East (Washington DC)",
-    "eu-gb": "United Kingdom (London)",
-    "eu-de": "Germany (Frankfurt)",
-    "eu-es": "Spain (Madrid)",
-    "jp-tok": "Japan (Tokyo)",
-    "jp-osa": "Japan (Osaka)",
-    "au-syd": "Australia (Sydney)",
-    "br-sao": "Brazil (Sao Paulo)",
-    "ca-tor": "Canada (Toronto)",
-}
+# never a human-readable display name - display_name/country/timezone come
+# from the central app/integrations/region_metadata.py table (Phase 30),
+# falling back to the raw slug for anything unmapped.
 
 _KUBERNETES_SERVICE_NAMES = {"containers-kubernetes", "containers-kubernetes-openshift"}
 
@@ -159,10 +148,18 @@ class IbmCloudProviderClient(CloudProviderClient):
             code, message = _classify_ibm_region_error(exc)
             raise ValidationAppError(message, code=code) from exc
 
-        regions = [
-            {"id": entry["name"], "display_name": _IBM_REGION_DISPLAY_NAMES.get(entry["name"], entry["name"])}
-            for entry in response.get_result().get("regions", [])
-        ]
+        regions = []
+        for entry in response.get_result().get("regions", []):
+            region_id = entry["name"]
+            metadata = region_metadata.lookup("ibm", region_id)
+            regions.append(
+                {
+                    "id": region_id,
+                    "display_name": metadata["display_name"] if metadata else region_id,
+                    "country": metadata["country"] if metadata else None,
+                    "timezone": metadata["timezone"] if metadata else None,
+                }
+            )
         if not regions:
             raise ValidationAppError(
                 "IBM Cloud returned zero regions for this account - unexpected for a working "

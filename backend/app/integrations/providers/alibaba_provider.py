@@ -41,6 +41,7 @@ from alibabacloud_vpc20160428.client import Client as VpcClient
 from Tea.exceptions import TeaException
 
 from app.integrations.cloud_provider_client import CloudProviderClient, CloudRegionInfo, CloudResourceSummary
+from app.integrations import region_metadata
 from app.utils.exceptions import ValidationAppError
 
 _CMS_NAMESPACE = "acs_ecs_dashboard"
@@ -201,7 +202,17 @@ class AlibabaCloudProviderClient(CloudProviderClient):
             raise ValidationAppError(message, code=code) from exc
 
         regions = response.body.regions.region or []
-        results = [{"id": r.region_id, "display_name": r.local_name or r.region_id} for r in regions]
+        results = []
+        for r in regions:
+            metadata = region_metadata.lookup("alibaba", r.region_id)
+            results.append(
+                {
+                    "id": r.region_id,
+                    "display_name": r.local_name or r.region_id,
+                    "country": metadata["country"] if metadata else None,
+                    "timezone": metadata["timezone"] if metadata else None,
+                }
+            )
         if not results:
             raise ValidationAppError(
                 "Alibaba Cloud returned zero regions for this account - unexpected for a working "

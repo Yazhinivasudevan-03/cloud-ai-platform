@@ -35,8 +35,8 @@ def test_list_regions_parses_a_realistic_response(mock_client_cls):
     regions = client.list_regions()
 
     assert regions == [
-        {"id": "us-south", "display_name": "US South (Dallas)"},
-        {"id": "eu-de", "display_name": "Germany (Frankfurt)"},
+        {"id": "us-south", "display_name": "Dallas", "country": "United States", "timezone": "America/Chicago"},
+        {"id": "eu-de", "display_name": "Frankfurt", "country": "Germany", "timezone": "Europe/Berlin"},
     ]
 
 

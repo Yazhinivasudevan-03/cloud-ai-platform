@@ -29,6 +29,7 @@ from app.integrations.cloud_provider_client import (
     MonthlyServiceCost,
     ResourceUsageSnapshot,
 )
+from app.integrations import region_metadata
 from app.utils.exceptions import ValidationAppError
 
 # The one, fixed, smallest/free-tier-eligible VM size deploy() will ever
@@ -112,10 +113,17 @@ class AzureCloudProviderClient(CloudProviderClient):
             code, message = _classify_azure_region_error(exc)
             raise ValidationAppError(message, code=code) from exc
 
-        regions = [
-            {"id": location.name, "display_name": location.display_name or location.name}
-            for location in locations
-        ]
+        regions = []
+        for location in locations:
+            metadata = region_metadata.lookup("azure", location.name)
+            regions.append(
+                {
+                    "id": location.name,
+                    "display_name": location.display_name or location.name,
+                    "country": metadata["country"] if metadata else None,
+                    "timezone": metadata["timezone"] if metadata else None,
+                }
+            )
         if not regions:
             raise ValidationAppError(
                 "Azure returned zero locations for this subscription - unexpected for a working "

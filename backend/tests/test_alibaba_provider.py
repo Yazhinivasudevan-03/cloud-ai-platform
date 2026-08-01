@@ -45,8 +45,8 @@ def test_list_regions_parses_a_realistic_response(mock_client_cls):
     regions = client.list_regions()
 
     assert regions == [
-        {"id": "cn-hangzhou", "display_name": "China (Hangzhou)"},
-        {"id": "ap-southeast-1", "display_name": "Singapore"},
+        {"id": "cn-hangzhou", "display_name": "China (Hangzhou)", "country": "China", "timezone": "Asia/Shanghai"},
+        {"id": "ap-southeast-1", "display_name": "Singapore", "country": "Singapore", "timezone": "Asia/Singapore"},
     ]
 
 

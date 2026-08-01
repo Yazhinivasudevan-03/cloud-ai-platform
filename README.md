@@ -6,7 +6,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 
 ## Project status
 
-**All 29 phases complete.** Built phase by phase - see [`docs/`](docs/) for a detailed, honestly-verified report for each phase.
+**All 30 phases complete.** Built phase by phase - see [`docs/`](docs/) for a detailed, honestly-verified report for each phase.
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -39,6 +39,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 | 27 | Real backend integrations for IBM Cloud and DigitalOcean (previously UI-only "connect" buttons since Phase 24) - credential validation, live region discovery, the full 5-category resource inventory, and compute/storage/networking provisioning, matching every other provider's capability surface; live verification against the real IBM Cloud IAM API caught and fixed a genuine discrepancy (invalid API keys reject with HTTP 400, not 401) | **Complete** - see [`docs/PHASE_27.md`](docs/PHASE_27.md) |
 | 28 | Real-time metrics + billing sync for IBM Cloud and DigitalOcean - DigitalOcean gets real Droplet CPU/memory/disk/network metrics (genuinely agent-free, unlike every other provider) and real invoice-based billing sync; IBM Cloud gets real Usage Reports billing sync, with Cloud Monitoring (metrics) explicitly disclosed as not-yet-supported (a separate Sysdig-based product with no official Python SDK) rather than faked | **Complete** - see [`docs/PHASE_28.md`](docs/PHASE_28.md) |
 | 29 | Automatic AWS resource discovery: closed the gap between "AWS account connected" and "the platform actually knows what's in it" - persisted `CloudResource`/`CloudResourceMetric` tables, 13 real inventory categories (EC2/ECS/EKS/Lambda/RDS/S3/EBS/ELB/ASG/VPC/Subnets/SecurityGroups/CloudWatch Alarms), automatic discovery on connect + a fast (default 60s) scheduled sweep, real CloudWatch metrics (CPU/network/disk/status-check/best-effort memory) for every running EC2 instance, and a live Dashboard/Cloud-Account-detail view - all additive, the existing Project/Deployment pipeline and Phase 25C browse endpoint untouched | **Complete** - see [`docs/PHASE_29.md`](docs/PHASE_29.md) |
+| 30 | Full global region support for all 7 providers: a new central `region_metadata.py` table (185 regions - AWS 32, Azure 37, GCP 40, OCI 32, IBM 10, DigitalOcean 12, Alibaba 22) enriches every already-live-discovered region with a real city/country/IANA timezone, replacing 4 old scattered display-name dicts; automatic region→timezone mapping (`selected_region_timezone`, no manual setup required); the post-connect region switcher is now a searchable/scrollable Autocomplete showing "code — City, Country"; confirmed "All Regions" mode already worked end to end for discovery/monitoring/alerts - live-verified against a real, already-connected AWS account across all 17 of its enabled regions | **Complete** - see [`docs/PHASE_30.md`](docs/PHASE_30.md) |
 
 ## Known limitations (honestly disclosed, not glossed over)
 

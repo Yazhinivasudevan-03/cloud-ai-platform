@@ -108,7 +108,9 @@ def test_aws_list_regions_retries_a_transient_error_then_succeeds():
             success_response,
         ]
         regions = client.list_regions()
-    assert regions == [{"id": "us-east-1", "display_name": "US East (N. Virginia)"}]
+    assert regions == [
+        {"id": "us-east-1", "display_name": "N. Virginia", "country": "United States", "timezone": "America/New_York"}
+    ]
     assert mock_client_factory.return_value.describe_regions.call_count == 2
 
 
@@ -178,8 +180,8 @@ def test_azure_list_regions_parses_real_locations(mock_client_cls, _mock_cred):
     regions = client.list_regions()
 
     assert regions == [
-        {"id": "eastus", "display_name": "East US"},
-        {"id": "uksouth", "display_name": "UK South"},
+        {"id": "eastus", "display_name": "East US", "country": "United States", "timezone": "America/New_York"},
+        {"id": "uksouth", "display_name": "UK South", "country": "United Kingdom", "timezone": "Europe/London"},
     ]
 
 
@@ -262,16 +264,18 @@ def _fake_region(name: str) -> SimpleNamespace:
 def test_gcp_list_regions_parses_real_regions(mock_client_cls, _mock_service_account):
     mock_client_cls.return_value.list.return_value = [
         _fake_region("us-central1"),
-        _fake_region("europe-west9"),  # not in the curated display-name table
+        _fake_region("mars-base1"),  # not in the curated region_metadata table
     ]
     client = GcpCloudProviderClient(GCP_CREDENTIALS, "us-central1")
 
     regions = client.list_regions()
 
-    assert regions[0] == {"id": "us-central1", "display_name": "Iowa"}
+    assert regions[0] == {
+        "id": "us-central1", "display_name": "Iowa", "country": "United States", "timezone": "America/Chicago"
+    }
     # Unmapped region still appears, using its own id as a fallback label -
     # never hidden just because it isn't in the curated table.
-    assert regions[1] == {"id": "europe-west9", "display_name": "europe-west9"}
+    assert regions[1] == {"id": "mars-base1", "display_name": "mars-base1", "country": None, "timezone": None}
 
 
 def test_gcp_list_regions_requires_service_account_json():

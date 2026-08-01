@@ -33,26 +33,16 @@ import tenacity
 from oci.exceptions import ServiceError
 
 from app.integrations.cloud_provider_client import CloudProviderClient, CloudRegionInfo, CloudResourceSummary
+from app.integrations import region_metadata
 from app.utils.exceptions import ValidationAppError
 
 _REQUIRED_CREDENTIAL_KEYS = ("user", "tenancy", "fingerprint", "key_content")
 
 # OCI's list_region_subscriptions() returns only region codes (e.g.
 # "us-ashburn-1") and a subscription status, never a human display name -
-# same presentation-only lookup pattern as aws_provider.py/gcp_provider.py,
-# falling back to the raw region code for anything unmapped.
-_OCI_REGION_DISPLAY_NAMES = {
-    "us-ashburn-1": "US East (Ashburn)",
-    "us-phoenix-1": "US West (Phoenix)",
-    "uk-london-1": "UK South (London)",
-    "eu-frankfurt-1": "Germany Central (Frankfurt)",
-    "ap-mumbai-1": "India West (Mumbai)",
-    "ap-tokyo-1": "Japan East (Tokyo)",
-    "ap-singapore-1": "Singapore",
-    "ap-sydney-1": "Australia East (Sydney)",
-    "ca-toronto-1": "Canada Southeast (Toronto)",
-    "sa-saopaulo-1": "Brazil East (Sao Paulo)",
-}
+# display_name/country/timezone come from the central
+# app/integrations/region_metadata.py table (Phase 30), falling back to the
+# raw region code for anything unmapped.
 
 _NAMESPACE = "oci_computeagent"
 
@@ -147,17 +137,22 @@ class OciCloudProviderClient(CloudProviderClient):
             code, message = _classify_oci_region_error(exc)
             raise ValidationAppError(message, code=code) from exc
 
-        regions = [
-            {
-                "id": subscription.region_name,
-                "display_name": _OCI_REGION_DISPLAY_NAMES.get(subscription.region_name, subscription.region_name),
-            }
-            for subscription in response.data
+        regions = []
+        for subscription in response.data:
             # "READY" is the only status that means the region is actually
             # usable - a subscription still being provisioned isn't a real
             # choice yet, so it's excluded rather than shown as available.
-            if getattr(subscription, "status", "READY") == "READY"
-        ]
+            if getattr(subscription, "status", "READY") != "READY":
+                continue
+            metadata = region_metadata.lookup("oci", subscription.region_name)
+            regions.append(
+                {
+                    "id": subscription.region_name,
+                    "display_name": metadata["display_name"] if metadata else subscription.region_name,
+                    "country": metadata["country"] if metadata else None,
+                    "timezone": metadata["timezone"] if metadata else None,
+                }
+            )
         if not regions:
             raise ValidationAppError(
                 "OCI returned zero ready region subscriptions for this tenancy - unexpected for a "

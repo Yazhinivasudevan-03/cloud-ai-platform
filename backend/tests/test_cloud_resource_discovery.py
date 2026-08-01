@@ -184,6 +184,64 @@ def test_discover_account_raises_and_records_the_real_error_on_genuine_failure(
     assert "boom" in account.last_discovery_error
 
 
+@mock_aws
+def test_discover_account_aggregates_across_every_region_in_all_mode(client, make_user_with_role, db_session):
+    # Requirement 7 (Phase 30): "All Regions" mode must discover/persist
+    # resources from every one of the account's discovered regions, not
+    # just its (irrelevant, in "all" mode) selected_region column.
+    token = make_user_with_role("discovery_op_all_regions", "operator")
+    me = client.get("/api/v1/auth/me", headers=_auth_header(token)).json()
+    account = CloudProviderAccount(
+        user_id=me["id"],
+        provider="aws",
+        account_name="discovery-test-all-regions",
+        region="all",
+        credentials_encrypted=encrypt_credentials({"access_key_id": "testing", "secret_access_key": "testing"}),
+        credentials_validated=True,
+        available_regions=(
+            '[{"id": "us-east-1", "display_name": "N. Virginia", "country": "United States", '
+            '"timezone": "America/New_York"}, {"id": "us-west-2", "display_name": "Oregon", '
+            '"country": "United States", "timezone": "America/Los_Angeles"}]'
+        ),
+    )
+    db_session.add(account)
+    db_session.commit()
+    db_session.refresh(account)
+
+    for region in ("us-east-1", "us-west-2"):
+        ec2 = boto3.client(
+            "ec2", region_name=region, aws_access_key_id="testing", aws_secret_access_key="testing"
+        )
+        ec2.run_instances(ImageId="ami-12345678", MinCount=1, MaxCount=1, InstanceType="t2.micro")
+
+    CloudResourceDiscoveryService(db_session).discover_account(account.id, me["id"])
+
+    resources = CloudResourceRepository(db_session).list_for_account(account.id, resource_type="ec2_instance")
+    regions_seen = {r.region for r in resources}
+    assert regions_seen == {"us-east-1", "us-west-2"}
+
+
+def test_discover_account_raises_a_clear_error_when_all_mode_has_no_discovered_regions(
+    client, make_user_with_role, db_session
+):
+    token = make_user_with_role("discovery_op_all_no_regions", "operator")
+    me = client.get("/api/v1/auth/me", headers=_auth_header(token)).json()
+    account = CloudProviderAccount(
+        user_id=me["id"],
+        provider="aws",
+        account_name="discovery-test-all-no-regions",
+        region="all",
+        credentials_encrypted=encrypt_credentials({"access_key_id": "testing", "secret_access_key": "testing"}),
+        credentials_validated=True,
+    )
+    db_session.add(account)
+    db_session.commit()
+
+    with pytest.raises(ValidationAppError) as exc_info:
+        CloudResourceDiscoveryService(db_session).discover_account(account.id, me["id"])
+    assert exc_info.value.code == "NO_REGIONS_DISCOVERED"
+
+
 def test_discover_all_tolerates_a_failing_account(client, make_user_with_role, db_session):
     token_a = make_user_with_role("discovery_op_all_a", "operator")
     token_b = make_user_with_role("discovery_op_all_b", "operator")

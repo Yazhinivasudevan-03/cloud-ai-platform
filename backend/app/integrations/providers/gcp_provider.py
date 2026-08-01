@@ -32,6 +32,7 @@ from app.integrations.cloud_provider_client import (
     ResourceUsageSnapshot,
 )
 from app.integrations.gcp_monitoring import fetch_instance_resource_usage
+from app.integrations import region_metadata
 from app.utils.exceptions import ValidationAppError
 
 # The one, fixed, smallest/free-tier-eligible machine type deploy() will
@@ -40,24 +41,9 @@ from app.utils.exceptions import ValidationAppError
 _DEPLOY_MACHINE_TYPE = "e2-micro"
 
 # Compute Engine's Region resource has no dedicated human-readable display
-# name field (unlike Azure's) - this table is presentation-only labelling
-# for regions the live API actually returned, with a raw-id fallback for
-# anything unmapped (see aws_provider.py's identical disclosure).
-_GCP_REGION_DISPLAY_NAMES = {
-    "us-central1": "Iowa",
-    "us-east1": "South Carolina",
-    "us-east4": "Northern Virginia",
-    "us-west1": "Oregon",
-    "us-west2": "Los Angeles",
-    "europe-west1": "Belgium",
-    "europe-west2": "London",
-    "europe-west3": "Frankfurt",
-    "europe-north1": "Finland",
-    "asia-south1": "Mumbai",
-    "asia-southeast1": "Singapore",
-    "asia-northeast1": "Tokyo",
-    "australia-southeast1": "Sydney",
-}
+# name field (unlike Azure's) - display_name/country/timezone come from the
+# central app/integrations/region_metadata.py table (Phase 30), falling
+# back to the raw region code for anything unmapped.
 
 
 def _is_retryable_gcp_error(exc: BaseException) -> bool:
@@ -144,10 +130,17 @@ class GcpCloudProviderClient(CloudProviderClient):
             code, message = _classify_gcp_region_error(exc)
             raise ValidationAppError(message, code=code) from exc
 
-        results = [
-            {"id": region.name, "display_name": _GCP_REGION_DISPLAY_NAMES.get(region.name, region.name)}
-            for region in regions
-        ]
+        results = []
+        for region in regions:
+            metadata = region_metadata.lookup("gcp", region.name)
+            results.append(
+                {
+                    "id": region.name,
+                    "display_name": metadata["display_name"] if metadata else region.name,
+                    "country": metadata["country"] if metadata else None,
+                    "timezone": metadata["timezone"] if metadata else None,
+                }
+            )
         if not results:
             raise ValidationAppError(
                 "GCP returned zero regions for this project - unexpected for a working project, "

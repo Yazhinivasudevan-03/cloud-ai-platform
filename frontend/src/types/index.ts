@@ -451,6 +451,11 @@ export const ALL_REGIONS_SENTINEL = "all";
 export interface CloudRegion {
   id: string;
   display_name: string;
+  // Phase 30: best-effort enrichment from the backend's central region
+  // metadata table - null when that table doesn't cover this region yet
+  // (never fabricated, the region itself is never hidden).
+  country?: string | null;
+  timezone?: string | null;
 }
 
 export interface CloudAccountRegions {
@@ -458,6 +463,10 @@ export interface CloudAccountRegions {
   regions: CloudRegion[];
   last_region_sync: string | null;
   connection_status: string;
+  // Phase 30 (automatic region -> IANA timezone mapping): null when
+  // selected_region is "all" (no single timezone applies) or the region
+  // isn't in the metadata table yet.
+  selected_region_timezone?: string | null;
 }
 
 // --- Read-only cloud resource inventory (Phase 25C) ---------------------

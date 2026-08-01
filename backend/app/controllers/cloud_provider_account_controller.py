@@ -32,12 +32,25 @@ from app.services.cloud_resource_discovery_service import CloudResourceDiscovery
 from app.services.cloud_resource_inventory_service import CloudResourceInventoryService
 
 
+def _selected_region_timezone(account: CloudProviderAccount, regions: list) -> str | None:
+    """Phase 30 (requirement 6): the currently selected region's real IANA
+    timezone, resolved from this same account's already-enriched
+    available_regions (plain dicts, per CloudRegionInfo/load_available_regions) -
+    "all" has no single timezone, and a region code region_metadata.py
+    doesn't cover yet resolves to None (never guessed)."""
+    if account.region == "all":
+        return None
+    return next((entry.get("timezone") for entry in regions if entry.get("id") == account.region), None)
+
+
 def _regions_read(account: CloudProviderAccount) -> CloudAccountRegionsRead:
+    regions = load_available_regions(account)
     return CloudAccountRegionsRead(
         selected_region=account.region,
-        regions=load_available_regions(account),
+        regions=regions,
         last_region_sync=account.last_region_sync,
         connection_status=account.connection_status,
+        selected_region_timezone=_selected_region_timezone(account, regions),
     )
 
 

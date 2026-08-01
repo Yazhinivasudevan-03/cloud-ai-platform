@@ -56,6 +56,14 @@ def test_get_regions_triggers_a_live_sync_the_first_time(client, make_user_with_
     assert "us-east-1" in region_ids
     assert body["selected_region"] == "us-east-1"
 
+    # Phase 30: every discovered region is enriched with country/timezone
+    # from the central region_metadata table, and the currently selected
+    # region's timezone is automatically resolved.
+    us_east_1 = next(r for r in body["regions"] if r["id"] == "us-east-1")
+    assert us_east_1["country"] == "United States"
+    assert us_east_1["timezone"] == "America/New_York"
+    assert body["selected_region_timezone"] == "America/New_York"
+
 
 @mock_aws
 def test_get_regions_serves_the_cached_snapshot_on_a_second_call(client, make_user_with_role, db_session):
@@ -125,6 +133,23 @@ def test_get_regions_does_not_resync_within_the_cache_ttl(client, make_user_with
     # overwritten by a fresh live call.
     returned = datetime.fromisoformat(second["last_region_sync"])
     assert abs((returned - still_fresh_sync_time).total_seconds()) < 2
+
+
+@mock_aws
+def test_selected_region_timezone_is_none_when_all_regions_is_selected(client, make_user_with_role, db_session):
+    token = make_user_with_role("region_op_all_tz", "operator")
+    me = client.get("/api/v1/auth/me", headers=_auth_header(token)).json()
+    account = _make_cloud_account(db_session, me["id"], "all_tz")
+    client.get(f"/api/v1/cloud-provider-accounts/{account.id}/regions", headers=_auth_header(token))
+
+    client.patch(
+        f"/api/v1/cloud-provider-accounts/{account.id}/region",
+        json={"selected_region": "all"},
+        headers=_auth_header(token),
+    )
+
+    response = client.get(f"/api/v1/cloud-provider-accounts/{account.id}/regions", headers=_auth_header(token))
+    assert response.json()["selected_region_timezone"] is None
 
 
 @mock_aws

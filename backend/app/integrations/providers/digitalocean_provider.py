@@ -40,6 +40,7 @@ from app.integrations.cloud_provider_client import (
 )
 from app.integrations.digitalocean_billing import fetch_monthly_costs_by_service as fetch_do_monthly_costs
 from app.integrations.digitalocean_monitoring import fetch_droplet_resource_usage
+from app.integrations import region_metadata
 from app.utils.exceptions import ValidationAppError
 
 # The one, fixed, smallest Droplet size slug deploy() will ever request -
@@ -129,11 +130,19 @@ class DigitalOceanCloudProviderClient(CloudProviderClient):
             code, message = _classify_do_region_error(exc)
             raise ValidationAppError(message, code=code) from exc
 
-        regions = [
-            {"id": entry["slug"], "display_name": entry["name"]}
-            for entry in response.get("regions", [])
-            if entry.get("available", True)
-        ]
+        regions = []
+        for entry in response.get("regions", []):
+            if not entry.get("available", True):
+                continue
+            metadata = region_metadata.lookup("digitalocean", entry["slug"])
+            regions.append(
+                {
+                    "id": entry["slug"],
+                    "display_name": entry["name"],
+                    "country": metadata["country"] if metadata else None,
+                    "timezone": metadata["timezone"] if metadata else None,
+                }
+            )
         if not regions:
             raise ValidationAppError(
                 "DigitalOcean returned zero available regions for this account - unexpected for a "

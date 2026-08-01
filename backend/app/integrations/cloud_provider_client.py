@@ -24,6 +24,12 @@ from app.utils.exceptions import ValidationAppError
 class CloudRegionInfo(TypedDict):
     id: str
     display_name: str
+    # Phase 30: best-effort enrichment from app/integrations/region_metadata.py
+    # - None when that central table doesn't cover this region code yet
+    # (never fabricated, never hides the region itself - id/display_name
+    # above are always populated from the live provider API regardless).
+    country: str | None
+    timezone: str | None
 
 
 class CloudResourceSummary(TypedDict):

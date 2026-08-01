@@ -23,32 +23,16 @@ from app.integrations.cloud_provider_client import (
     MonthlyServiceCost,
     ResourceUsageSnapshot,
 )
+from app.integrations import region_metadata
 from app.utils.exceptions import ValidationAppError
 
 # AWS's DescribeRegions API returns only region codes (e.g. "us-east-1"),
-# never a human-readable display name - this table is presentation-only
-# labelling for regions the live API actually returned, not a substitute
+# never a human-readable display name - display_name/country/timezone
+# below are presentation-only enrichment from the central
+# app/integrations/region_metadata.py table (Phase 30), not a substitute
 # for calling it. An unmapped/newly-launched region still appears (using
-# its raw code as the display name via .get(..., region_id) below), it's
-# simply not yet prettified - it is never hidden.
-_AWS_REGION_DISPLAY_NAMES = {
-    "us-east-1": "US East (N. Virginia)",
-    "us-east-2": "US East (Ohio)",
-    "us-west-1": "US West (N. California)",
-    "us-west-2": "US West (Oregon)",
-    "eu-west-1": "Europe (Ireland)",
-    "eu-west-2": "Europe (London)",
-    "eu-west-3": "Europe (Paris)",
-    "eu-central-1": "Europe (Frankfurt)",
-    "eu-north-1": "Europe (Stockholm)",
-    "ap-south-1": "Asia Pacific (Mumbai)",
-    "ap-southeast-1": "Asia Pacific (Singapore)",
-    "ap-southeast-2": "Asia Pacific (Sydney)",
-    "ap-northeast-1": "Asia Pacific (Tokyo)",
-    "ap-northeast-2": "Asia Pacific (Seoul)",
-    "ca-central-1": "Canada (Central)",
-    "sa-east-1": "South America (Sao Paulo)",
-}
+# its raw code as the display name), it's simply not yet prettified - it
+# is never hidden.
 
 # The one, fixed, smallest/free-tier-eligible instance size deploy() will
 # ever request - not user-configurable in this pass, to bound real-world
@@ -189,13 +173,18 @@ class AwsCloudProviderClient(CloudProviderClient):
             code, message = _classify_aws_region_error(exc)
             raise ValidationAppError(message, code=code) from exc
 
-        regions = [
-            {
-                "id": entry["RegionName"],
-                "display_name": _AWS_REGION_DISPLAY_NAMES.get(entry["RegionName"], entry["RegionName"]),
-            }
-            for entry in response.get("Regions", [])
-        ]
+        regions = []
+        for entry in response.get("Regions", []):
+            region_id = entry["RegionName"]
+            metadata = region_metadata.lookup("aws", region_id)
+            regions.append(
+                {
+                    "id": region_id,
+                    "display_name": metadata["display_name"] if metadata else region_id,
+                    "country": metadata["country"] if metadata else None,
+                    "timezone": metadata["timezone"] if metadata else None,
+                }
+            )
         if not regions:
             raise ValidationAppError(
                 "AWS returned zero regions for this account - unexpected for a working AWS account, "

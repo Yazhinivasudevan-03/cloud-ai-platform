@@ -42,7 +42,9 @@ def test_list_regions_parses_a_realistic_response(mock_client_cls):
 
     # ams2 is excluded - "available": False means new resources can't be
     # created there right now, the same READY-only filtering OCI applies.
-    assert regions == [{"id": "nyc1", "display_name": "New York 1"}]
+    assert regions == [
+        {"id": "nyc1", "display_name": "New York 1", "country": "United States", "timezone": "America/New_York"}
+    ]
 
 
 def test_list_regions_requires_credentials():

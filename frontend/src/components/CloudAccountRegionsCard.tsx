@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Autocomplete,
   Button,
   Chip,
   CircularProgress,
-  MenuItem,
   Paper,
   Stack,
   TextField,
@@ -13,13 +13,31 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { cloudProviderAccountsApi } from "@/services/cloudProviderAccountsApi";
 import { formatDateTime } from "@/utils/formatters";
-import { ALL_REGIONS_SENTINEL } from "@/types";
+import { ALL_REGIONS_SENTINEL, type CloudRegion } from "@/types";
 
 const STATUS_COLOR: Record<string, "success" | "error" | "warning" | "default"> = {
   CONNECTED: "success",
   ERROR: "error",
   CREDENTIALS_EXPIRED: "warning",
 };
+
+const ALL_REGIONS_OPTION: CloudRegion = {
+  id: ALL_REGIONS_SENTINEL,
+  display_name: "All Regions (aggregate)",
+  country: null,
+  timezone: null,
+};
+
+// "code — City, Country" (Phase 30 requirement 2's exact format) - falls
+// back gracefully to just the display name when country isn't in the
+// region_metadata table yet for this region (never hides the region).
+function regionOptionLabel(option: CloudRegion): string {
+  if (option.id === ALL_REGIONS_SENTINEL) return option.display_name;
+  const location = option.country && option.country !== option.display_name
+    ? `${option.display_name}, ${option.country}`
+    : option.display_name;
+  return `${option.id} — ${location}`;
+}
 
 export function CloudAccountRegionsCard({ accountId }: { accountId: number }) {
   const queryClient = useQueryClient();
@@ -58,6 +76,8 @@ export function CloudAccountRegionsCard({ accountId }: { accountId: number }) {
   const data = regionsQuery.data;
   const isSwitching = selectMutation.isPending;
   const isRefreshing = refreshMutation.isPending;
+  const regionOptions: CloudRegion[] = data ? [ALL_REGIONS_OPTION, ...data.regions] : [ALL_REGIONS_OPTION];
+  const selectedOption = regionOptions.find((r) => r.id === data?.selected_region);
 
   return (
     <Paper sx={{ p: 2.5 }}>
@@ -87,23 +107,23 @@ export function CloudAccountRegionsCard({ accountId }: { accountId: number }) {
       {data && (
         <>
           <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" sx={{ mt: 1 }}>
-            <TextField
-              select
-              label="Region"
-              size="small"
-              value={data.selected_region}
+            <Autocomplete
+              options={regionOptions}
+              getOptionLabel={regionOptionLabel}
+              isOptionEqualToValue={(option, value) => option.id === value.id}
+              value={selectedOption}
               disabled={isSwitching || isRefreshing}
-              onChange={(e) => selectMutation.mutate(e.target.value)}
-              sx={{ minWidth: 260 }}
-            >
-              <MenuItem value={ALL_REGIONS_SENTINEL}>All Regions (aggregate)</MenuItem>
-              {data.regions.map((region) => (
-                <MenuItem key={region.id} value={region.id}>
-                  {region.display_name}
-                  {region.id !== region.display_name ? ` (${region.id})` : ""}
-                </MenuItem>
-              ))}
-            </TextField>
+              disableClearable
+              size="small"
+              sx={{ minWidth: 320 }}
+              onChange={(_, newValue) => {
+                if (newValue) selectMutation.mutate(newValue.id);
+              }}
+              slotProps={{ listbox: { style: { maxHeight: 300, overflow: "auto" } } }}
+              renderInput={(params) => (
+                <TextField {...params} label="Region" placeholder="Search by code, city, or country" />
+              )}
+            />
 
             <Button
               size="small"
@@ -131,7 +151,13 @@ export function CloudAccountRegionsCard({ accountId }: { accountId: number }) {
             </Typography>
           )}
 
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: "block" }}>
+          {data.selected_region_timezone && (
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: "block" }}>
+              Timezone: {data.selected_region_timezone}
+            </Typography>
+          )}
+
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
             {data.last_region_sync
               ? `Last synced ${formatDateTime(data.last_region_sync)}`
               : "Not synced yet"}
