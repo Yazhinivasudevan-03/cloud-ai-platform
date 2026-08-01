@@ -304,6 +304,36 @@ def test_validate_credentials_flips_the_flag_and_starts_monitoring(client, make_
     assert account.available_regions != "[]"
 
 
+@mock_aws
+def test_validate_credentials_also_starts_automatic_resource_discovery(client, make_user_with_role, db_session):
+    # Phase 29: validate-credentials is the "account connected" moment -
+    # real AWS resources must be discovered right away, not just regions.
+    token = make_user_with_role("cred_op_discovery", "operator")
+    ec2 = boto3.client("ec2", region_name="us-east-1", aws_access_key_id="testing", aws_secret_access_key="testing")
+    ec2.run_instances(ImageId="ami-12345678", MinCount=1, MaxCount=1, InstanceType="t2.micro")
+
+    created = client.post(
+        "/api/v1/cloud-provider-accounts",
+        json={
+            "provider": "aws",
+            "account_name": "cred-workflow-discovery",
+            "region": "us-east-1",
+            "credentials": AWS_CREDENTIALS,
+        },
+        headers=_auth_header(token),
+    ).json()
+
+    client.post(f"/api/v1/cloud-provider-accounts/{created['id']}/validate-credentials", headers=_auth_header(token))
+
+    response = client.get(
+        f"/api/v1/cloud-provider-accounts/{created['id']}/discovered-resources",
+        params={"resource_type": "ec2_instance"},
+        headers=_auth_header(token),
+    )
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 1
+
+
 def test_validate_credentials_reports_the_exact_reason_and_does_not_flip_the_flag(
     client, make_user_with_role, db_session
 ):

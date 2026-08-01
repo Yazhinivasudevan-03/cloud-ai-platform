@@ -4,11 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import { Button, Chip, Paper, Stack, Typography } from "@mui/material";
 import Grid from "@mui/material/Grid2";
 import AddIcon from "@mui/icons-material/Add";
+import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import CloudQueueIcon from "@mui/icons-material/CloudQueueOutlined";
+import DnsOutlinedIcon from "@mui/icons-material/DnsOutlined";
 import FolderIcon from "@mui/icons-material/FolderOutlined";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import MonitorHeartOutlinedIcon from "@mui/icons-material/MonitorHeartOutlined";
 import NotificationsActiveIcon from "@mui/icons-material/NotificationsActiveOutlined";
+import PauseCircleOutlinedIcon from "@mui/icons-material/PauseCircleOutlined";
 import TuneIcon from "@mui/icons-material/TuneOutlined";
 import MailIcon from "@mui/icons-material/MailOutlined";
 import { PageHeader } from "@/components/PageHeader";
@@ -63,6 +66,31 @@ export function DashboardPage() {
     queryKey: ["notifications", "unread-count"],
     queryFn: () => notificationsApi.listMine(1, 1, false),
   });
+  const awsAccountIds = (cloudAccountsQuery.data?.items ?? [])
+    .filter((a) => a.provider === "aws" && a.credentials_validated)
+    .map((a) => a.id);
+  // Automatic AWS resource discovery (Phase 29) - aggregated across every
+  // connected AWS account, reading only the persisted discovery summary
+  // (no live provider call on every dashboard load). Polls at the same
+  // 60s cadence as the other "live" dashboard stats above.
+  const ec2SummaryQuery = useQuery({
+    queryKey: ["cloud-provider-accounts", "ec2-summary", awsAccountIds],
+    queryFn: async () => {
+      const summaries = await Promise.all(
+        awsAccountIds.map((id) => cloudProviderAccountsApi.getDiscoverySummary(id).catch(() => null)),
+      );
+      return summaries.reduce(
+        (acc, s) => ({
+          total: acc.total + (s?.total_instances ?? 0),
+          running: acc.running + (s?.running_instances ?? 0),
+          stopped: acc.stopped + (s?.stopped_instances ?? 0),
+        }),
+        { total: 0, running: 0, stopped: 0 },
+      );
+    },
+    enabled: awsAccountIds.length > 0,
+    refetchInterval: 60_000,
+  });
 
   return (
     <>
@@ -109,6 +137,37 @@ export function DashboardPage() {
           />
         </Grid>
       </Grid>
+
+      {awsAccountIds.length > 0 && (
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          <Grid size={{ xs: 12, sm: 4 }}>
+            <StatCard
+              label="EC2 instances"
+              value={ec2SummaryQuery.data?.total ?? "-"}
+              icon={DnsOutlinedIcon}
+              to="/cloud-accounts"
+            />
+          </Grid>
+          <Grid size={{ xs: 12, sm: 4 }}>
+            <StatCard
+              label="Running instances"
+              value={ec2SummaryQuery.data?.running ?? "-"}
+              icon={CheckCircleOutlinedIcon}
+              color="success.main"
+              to="/cloud-accounts"
+            />
+          </Grid>
+          <Grid size={{ xs: 12, sm: 4 }}>
+            <StatCard
+              label="Stopped instances"
+              value={ec2SummaryQuery.data?.stopped ?? "-"}
+              icon={PauseCircleOutlinedIcon}
+              color="text.secondary"
+              to="/cloud-accounts"
+            />
+          </Grid>
+        </Grid>
+      )}
 
       <Paper sx={{ p: 2.5, mb: 3 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" spacing={1}>

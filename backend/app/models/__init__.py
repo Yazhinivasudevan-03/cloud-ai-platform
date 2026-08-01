@@ -12,6 +12,8 @@ from app.models.cloud_account_alert_threshold import CloudAccountAlertThreshold
 from app.models.cloud_account_timezone import CloudAccountTimezone
 from app.models.cloud_cost import CloudCost
 from app.models.cloud_provider_account import CloudProviderAccount
+from app.models.cloud_resource import CloudResource
+from app.models.cloud_resource_metric import CloudResourceMetric
 from app.models.deployment import Deployment
 from app.models.failure_prediction import FailurePrediction
 from app.models.log import Log
@@ -36,6 +38,8 @@ __all__ = [
     "CloudAccountTimezone",
     "CloudCost",
     "CloudProviderAccount",
+    "CloudResource",
+    "CloudResourceMetric",
     "Deployment",
     "FailurePrediction",
     "Log",

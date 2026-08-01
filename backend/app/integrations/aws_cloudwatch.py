@@ -185,3 +185,193 @@ def fetch_ec2_resource_usage(
         "network_out_kbps": (network_out_bytes_per_period / period_seconds) * 8 / 1000,
         "recorded_at": latest_timestamp or end_time,
     }
+
+
+# --- Phase 29: richer EC2 metrics for the automatic-discovery pipeline ---
+_FULL_METRICS = [
+    "CPUUtilization",
+    "NetworkIn",
+    "NetworkOut",
+    "DiskReadBytes",
+    "DiskWriteBytes",
+    "StatusCheckFailed",
+]
+
+
+class Ec2FullMetrics(TypedDict):
+    cpu_usage_percent: float
+    network_in_kbps: float
+    network_out_kbps: float
+    disk_read_bytes: float
+    disk_write_bytes: float
+    status_check_failed: int | None
+    memory_usage_mb: float | None
+    recorded_at: datetime
+
+
+def _cloudwatch_client_kwargs(credentials: dict[str, str], region: str) -> dict[str, str]:
+    access_key_id = credentials.get("access_key_id")
+    secret_access_key = credentials.get("secret_access_key")
+    if not access_key_id or not secret_access_key:
+        raise ValidationAppError(
+            "AWS credentials must include 'access_key_id' and 'secret_access_key'",
+            code="AWS_CREDENTIALS_INCOMPLETE",
+        )
+    kwargs: dict[str, str] = {
+        "region_name": region,
+        "aws_access_key_id": access_key_id,
+        "aws_secret_access_key": secret_access_key,
+    }
+    session_token = credentials.get("session_token")
+    if session_token:
+        kwargs["aws_session_token"] = session_token
+    endpoint_url = credentials.get("endpoint_url")
+    if endpoint_url:
+        kwargs["endpoint_url"] = endpoint_url
+    return kwargs
+
+
+def _fetch_cwagent_memory_mb(
+    cloudwatch_client,
+    ec2_client,
+    instance_id: str,
+    instance_type: str,
+    start_time: datetime,
+    end_time: datetime,
+    period_seconds: int,
+) -> float | None:
+    """Best-effort only: the CWAgent namespace only exists if the customer
+    installed and configured the CloudWatch Agent on the instance - most
+    instances won't have it, and that's swallowed to None here (disclosed
+    as unavailable), never fabricated as 0.0, and never fails the overall
+    fetch (see this module's own docstring for the same convention already
+    applied to fetch_ec2_resource_usage). CWAgent's default example config
+    publishes mem_used_percent, a percentage rather than an absolute byte
+    value - converting that to MB requires the instance's real total
+    memory, fetched via a genuine EC2 DescribeInstanceTypes call, only
+    when a percent datapoint actually exists (never called speculatively
+    for instances that don't have the agent)."""
+    try:
+        response = cloudwatch_client.get_metric_data(
+            MetricDataQueries=[
+                {
+                    "Id": "mem",
+                    "MetricStat": {
+                        "Metric": {
+                            "Namespace": "CWAgent",
+                            "MetricName": "mem_used_percent",
+                            "Dimensions": [{"Name": "InstanceId", "Value": instance_id}],
+                        },
+                        "Period": period_seconds,
+                        "Stat": "Average",
+                    },
+                }
+            ],
+            StartTime=start_time,
+            EndTime=end_time,
+        )
+    except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError):
+        return None
+
+    mem_used_percent = None
+    for result in response.get("MetricDataResults", []):
+        if result.get("Values"):
+            mem_used_percent = result["Values"][0]
+            break
+    if mem_used_percent is None:
+        return None
+
+    try:
+        type_info = ec2_client.describe_instance_types(InstanceTypes=[instance_type])
+        memory_mib = type_info["InstanceTypes"][0]["MemoryInfo"]["SizeInMiB"]
+    except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError, KeyError, IndexError):
+        return None
+
+    return (mem_used_percent / 100) * memory_mib
+
+
+def fetch_ec2_full_metrics(
+    credentials: dict[str, str], region: str, instance_id: str, instance_type: str, lookback_minutes: int
+) -> Ec2FullMetrics:
+    """Real CloudWatch metric data for one EC2 instance (Phase 29's
+    automatic-discovery pipeline) - a superset of fetch_ec2_resource_usage
+    above, adding DiskReadBytes/DiskWriteBytes/StatusCheckFailed (all still
+    from EC2's default basic-monitoring namespace, no agent required) plus
+    a best-effort CWAgent memory reading. Raises the same ValidationAppError
+    codes as fetch_ec2_resource_usage for missing credentials / a rejected
+    request / no datapoints in the lookback window."""
+    client_kwargs = _cloudwatch_client_kwargs(credentials, region)
+    client = boto3.client("cloudwatch", **client_kwargs)
+    ec2_client = boto3.client("ec2", **client_kwargs)
+
+    end_time = datetime.now(timezone.utc) + timedelta(minutes=1)
+    start_time = end_time - timedelta(minutes=lookback_minutes + 1)
+    period_seconds = 60
+
+    @_cloudwatch_retry
+    def _get_metric_data():
+        return client.get_metric_data(
+            MetricDataQueries=[
+                {
+                    "Id": metric.lower(),
+                    "MetricStat": {
+                        "Metric": {
+                            "Namespace": _NAMESPACE,
+                            "MetricName": metric,
+                            "Dimensions": [{"Name": "InstanceId", "Value": instance_id}],
+                        },
+                        "Period": period_seconds,
+                        "Stat": "Maximum" if metric == "StatusCheckFailed" else "Average",
+                    },
+                }
+                for metric in _FULL_METRICS
+            ],
+            StartTime=start_time,
+            EndTime=end_time,
+        )
+
+    try:
+        response = _get_metric_data()
+    except botocore.exceptions.ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "Unknown")
+        raise ValidationAppError(
+            f"AWS CloudWatch rejected the request ({error_code}): {exc.response.get('Error', {}).get('Message', str(exc))}",
+            code="CLOUDWATCH_REQUEST_FAILED",
+        ) from exc
+    except botocore.exceptions.BotoCoreError as exc:
+        raise ValidationAppError(
+            f"Could not reach AWS CloudWatch: {exc}", code="CLOUDWATCH_REQUEST_FAILED"
+        ) from exc
+
+    values: dict[str, float] = {}
+    latest_timestamp: datetime | None = None
+    for result in response["MetricDataResults"]:
+        if result["Values"]:
+            values[result["Id"]] = result["Values"][0]
+            timestamp = result["Timestamps"][0]
+            if latest_timestamp is None or timestamp > latest_timestamp:
+                latest_timestamp = timestamp
+
+    if not values:
+        raise ValidationAppError(
+            f"CloudWatch returned no datapoints for instance '{instance_id}' "
+            f"in the last {lookback_minutes} minutes",
+            code="NO_CLOUDWATCH_DATA",
+        )
+
+    network_in_bytes_per_period = values.get("networkin", 0.0)
+    network_out_bytes_per_period = values.get("networkout", 0.0)
+    status_check_raw = values.get("statuscheckfailed")
+
+    return {
+        "cpu_usage_percent": values.get("cpuutilization", 0.0),
+        "network_in_kbps": (network_in_bytes_per_period / period_seconds) * 8 / 1000,
+        "network_out_kbps": (network_out_bytes_per_period / period_seconds) * 8 / 1000,
+        "disk_read_bytes": values.get("diskreadbytes", 0.0),
+        "disk_write_bytes": values.get("diskwritebytes", 0.0),
+        "status_check_failed": int(status_check_raw) if status_check_raw is not None else None,
+        "memory_usage_mb": _fetch_cwagent_memory_mb(
+            client, ec2_client, instance_id, instance_type, start_time, end_time, period_seconds
+        ),
+        "recorded_at": latest_timestamp or end_time,
+    }

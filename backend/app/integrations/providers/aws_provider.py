@@ -294,7 +294,11 @@ class AwsCloudProviderClient(CloudProviderClient):
         message = exc.response.get("Error", {}).get("Message", str(exc))
         return ValidationAppError(f"AWS rejected the request ({error_code}): {message}", code=code)
 
-    def list_resources(self, region: str) -> list[CloudResourceSummary]:
+    def _describe_ec2_instances_full(self, region: str) -> list[dict]:
+        """Raw per-instance dicts from a single real describe_instances call -
+        list_resources() and list_ec2_instances_detailed() (Phase 29) are two
+        different projections of this one call, so there is exactly one
+        place that ever talks to EC2 for instance inventory."""
         client = boto3.client("ec2", **self._client_kwargs_for(region))
 
         @_aws_retry
@@ -302,27 +306,267 @@ class AwsCloudProviderClient(CloudProviderClient):
             return list(client.get_paginator("describe_instances").paginate())
 
         try:
-            results: list[CloudResourceSummary] = []
+            instances: list[dict] = []
             for page in _describe_instances():
                 for reservation in page.get("Reservations", []):
-                    for instance in reservation.get("Instances", []):
-                        name = next(
-                            (t["Value"] for t in instance.get("Tags", []) if t.get("Key") == "Name"),
-                            instance["InstanceId"],
-                        )
-                        results.append(
-                            {
-                                "id": instance["InstanceId"],
-                                "name": name,
-                                "type": instance.get("InstanceType", "unknown"),
-                                "region": region,
-                                "status": instance.get("State", {}).get("Name", "unknown"),
-                                "created_at": instance.get("LaunchTime"),
-                            }
-                        )
-            return results
+                    instances.extend(reservation.get("Instances", []))
+            return instances
         except botocore.exceptions.ClientError as exc:
             raise self._wrap_client_error(exc, "AWS_RESOURCE_INVENTORY_FAILED") from exc
+
+    @staticmethod
+    def _ec2_instance_name(instance: dict) -> str:
+        return next(
+            (t["Value"] for t in instance.get("Tags", []) if t.get("Key") == "Name"),
+            instance["InstanceId"],
+        )
+
+    def list_resources(self, region: str) -> list[CloudResourceSummary]:
+        return [
+            {
+                "id": instance["InstanceId"],
+                "name": self._ec2_instance_name(instance),
+                "type": instance.get("InstanceType", "unknown"),
+                "region": region,
+                "status": instance.get("State", {}).get("Name", "unknown"),
+                "created_at": instance.get("LaunchTime"),
+            }
+            for instance in self._describe_ec2_instances_full(region)
+        ]
+
+    def list_ec2_instances_detailed(self, region: str) -> list[dict]:
+        """The richer EC2 shape Phase 29's automatic-discovery/dashboard
+        pipeline needs (availability_zone, public_ip, private_ip, tags) -
+        see CloudProviderClient.list_ec2_instances_detailed's docstring."""
+        results: list[dict] = []
+        for instance in self._describe_ec2_instances_full(region):
+            results.append(
+                {
+                    "id": instance["InstanceId"],
+                    "name": self._ec2_instance_name(instance),
+                    "instance_type": instance.get("InstanceType", "unknown"),
+                    "region": region,
+                    "availability_zone": instance.get("Placement", {}).get("AvailabilityZone"),
+                    "status": instance.get("State", {}).get("Name", "unknown"),
+                    "public_ip": instance.get("PublicIpAddress"),
+                    "private_ip": instance.get("PrivateIpAddress"),
+                    "tags": {t["Key"]: t["Value"] for t in instance.get("Tags", []) if "Key" in t},
+                    "created_at": instance.get("LaunchTime"),
+                }
+            )
+        return results
+
+    def list_ecs_clusters(self, region: str) -> list[CloudResourceSummary]:
+        client = boto3.client("ecs", **self._client_kwargs_for(region))
+
+        @_aws_retry
+        def _list_cluster_arns() -> list[str]:
+            return client.list_clusters().get("clusterArns", [])
+
+        @_aws_retry
+        def _describe_clusters(arns: list[str]) -> list[dict]:
+            return client.describe_clusters(clusters=arns).get("clusters", [])
+
+        try:
+            arns = _list_cluster_arns()
+            if not arns:
+                return []
+            return [
+                {
+                    "id": cluster["clusterArn"],
+                    "name": cluster.get("clusterName", cluster["clusterArn"]),
+                    "type": "ecs_cluster",
+                    "region": region,
+                    "status": cluster.get("status", "unknown"),
+                    "created_at": None,
+                }
+                for cluster in _describe_clusters(arns)
+            ]
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_ECS_INVENTORY_FAILED") from exc
+
+    def list_serverless_functions(self, region: str) -> list[CloudResourceSummary]:
+        client = boto3.client("lambda", **self._client_kwargs_for(region))
+
+        @_aws_retry
+        def _list_functions() -> list[dict]:
+            return list(client.get_paginator("list_functions").paginate())
+
+        try:
+            results: list[CloudResourceSummary] = []
+            for page in _list_functions():
+                for fn in page.get("Functions", []):
+                    results.append(
+                        {
+                            "id": fn["FunctionArn"],
+                            "name": fn["FunctionName"],
+                            "type": fn.get("Runtime", "unknown"),
+                            "region": region,
+                            "status": fn.get("State", "Active"),
+                            "created_at": None,
+                        }
+                    )
+            return results
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_LAMBDA_INVENTORY_FAILED") from exc
+
+    def list_volumes(self, region: str) -> list[CloudResourceSummary]:
+        client = boto3.client("ec2", **self._client_kwargs_for(region))
+
+        @_aws_retry
+        def _describe_volumes() -> list[dict]:
+            return list(client.get_paginator("describe_volumes").paginate())
+
+        try:
+            results: list[CloudResourceSummary] = []
+            for page in _describe_volumes():
+                for volume in page.get("Volumes", []):
+                    name = next(
+                        (t["Value"] for t in volume.get("Tags", []) if t.get("Key") == "Name"),
+                        volume["VolumeId"],
+                    )
+                    results.append(
+                        {
+                            "id": volume["VolumeId"],
+                            "name": name,
+                            "type": volume.get("VolumeType", "unknown"),
+                            "region": region,
+                            "status": volume.get("State", "unknown"),
+                            "created_at": volume.get("CreateTime"),
+                        }
+                    )
+            return results
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_VOLUME_INVENTORY_FAILED") from exc
+
+    def list_load_balancers(self, region: str) -> list[CloudResourceSummary]:
+        client = boto3.client("elbv2", **self._client_kwargs_for(region))
+
+        @_aws_retry
+        def _describe_load_balancers() -> list[dict]:
+            return list(client.get_paginator("describe_load_balancers").paginate())
+
+        try:
+            results: list[CloudResourceSummary] = []
+            for page in _describe_load_balancers():
+                for lb in page.get("LoadBalancers", []):
+                    results.append(
+                        {
+                            "id": lb["LoadBalancerArn"],
+                            "name": lb.get("LoadBalancerName", lb["LoadBalancerArn"]),
+                            "type": lb.get("Type", "unknown"),
+                            "region": region,
+                            "status": lb.get("State", {}).get("Code", "unknown"),
+                            "created_at": lb.get("CreatedTime"),
+                        }
+                    )
+            return results
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_LOAD_BALANCER_INVENTORY_FAILED") from exc
+
+    def list_scaling_groups(self, region: str) -> list[CloudResourceSummary]:
+        client = boto3.client("autoscaling", **self._client_kwargs_for(region))
+
+        @_aws_retry
+        def _describe_asgs() -> list[dict]:
+            return list(client.get_paginator("describe_auto_scaling_groups").paginate())
+
+        try:
+            results: list[CloudResourceSummary] = []
+            for page in _describe_asgs():
+                for asg in page.get("AutoScalingGroups", []):
+                    results.append(
+                        {
+                            "id": asg["AutoScalingGroupARN"],
+                            "name": asg["AutoScalingGroupName"],
+                            "type": "auto_scaling_group",
+                            "region": region,
+                            "status": f"{len(asg.get('Instances', []))}/{asg.get('DesiredCapacity', 0)} instances",
+                            "created_at": asg.get("CreatedTime"),
+                        }
+                    )
+            return results
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_SCALING_GROUP_INVENTORY_FAILED") from exc
+
+    def list_subnets(self, region: str) -> list[CloudResourceSummary]:
+        client = boto3.client("ec2", **self._client_kwargs_for(region))
+
+        @_aws_retry
+        def _describe_subnets() -> list[dict]:
+            return list(client.get_paginator("describe_subnets").paginate())
+
+        try:
+            results: list[CloudResourceSummary] = []
+            for page in _describe_subnets():
+                for subnet in page.get("Subnets", []):
+                    name = next(
+                        (t["Value"] for t in subnet.get("Tags", []) if t.get("Key") == "Name"),
+                        subnet["SubnetId"],
+                    )
+                    results.append(
+                        {
+                            "id": subnet["SubnetId"],
+                            "name": name,
+                            "type": "subnet",
+                            "region": region,
+                            "status": subnet.get("State", "unknown"),
+                            "created_at": None,
+                        }
+                    )
+            return results
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_SUBNET_INVENTORY_FAILED") from exc
+
+    def list_security_groups(self, region: str) -> list[CloudResourceSummary]:
+        client = boto3.client("ec2", **self._client_kwargs_for(region))
+
+        @_aws_retry
+        def _describe_security_groups() -> list[dict]:
+            return list(client.get_paginator("describe_security_groups").paginate())
+
+        try:
+            results: list[CloudResourceSummary] = []
+            for page in _describe_security_groups():
+                for group in page.get("SecurityGroups", []):
+                    results.append(
+                        {
+                            "id": group["GroupId"],
+                            "name": group.get("GroupName", group["GroupId"]),
+                            "type": "security_group",
+                            "region": region,
+                            "status": "active",
+                            "created_at": None,
+                        }
+                    )
+            return results
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_SECURITY_GROUP_INVENTORY_FAILED") from exc
+
+    def list_alarms(self, region: str) -> list[CloudResourceSummary]:
+        client = boto3.client("cloudwatch", **self._client_kwargs_for(region))
+
+        @_aws_retry
+        def _describe_alarms() -> list[dict]:
+            return list(client.get_paginator("describe_alarms").paginate())
+
+        try:
+            results: list[CloudResourceSummary] = []
+            for page in _describe_alarms():
+                for alarm in page.get("MetricAlarms", []):
+                    results.append(
+                        {
+                            "id": alarm["AlarmArn"],
+                            "name": alarm["AlarmName"],
+                            "type": "cloudwatch_alarm",
+                            "region": region,
+                            "status": alarm.get("StateValue", "unknown"),
+                            "created_at": alarm.get("AlarmConfigurationUpdatedTimestamp"),
+                        }
+                    )
+            return results
+        except botocore.exceptions.ClientError as exc:
+            raise self._wrap_client_error(exc, "AWS_ALARM_INVENTORY_FAILED") from exc
 
     def list_clusters(self, region: str) -> list[CloudResourceSummary]:
         client = boto3.client("eks", **self._client_kwargs_for(region))

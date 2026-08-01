@@ -17,11 +17,18 @@ from app.schemas.cloud_provider_account import (
 )
 from app.schemas.cloud_region import CloudAccountRegionsRead
 from app.schemas.cloud_resource import CloudResourceListRead, CloudResourceRead
+from app.schemas.cloud_resource_discovery import (
+    CloudAccountDiscoverySummary,
+    DiscoveredResourceListRead,
+    DiscoveredResourceRead,
+    Ec2MetricRead,
+)
 from app.schemas.common import PaginatedResponse, PaginationMeta
 from app.schemas.resource_usage import ResourceUsageRead
 from app.services.cloud_provider_account_service import CloudProviderAccountService
 from app.services.cloud_provisioning_service import CloudProvisioningService
 from app.services.cloud_region_sync_service import CloudRegionSyncService, load_available_regions
+from app.services.cloud_resource_discovery_service import CloudResourceDiscoveryService
 from app.services.cloud_resource_inventory_service import CloudResourceInventoryService
 
 
@@ -41,6 +48,7 @@ class CloudProviderAccountController:
         self.region_sync_service = CloudRegionSyncService(db)
         self.resource_inventory_service = CloudResourceInventoryService(db)
         self.provisioning_service = CloudProvisioningService(db)
+        self.discovery_service = CloudResourceDiscoveryService(db)
 
     def create(self, user_id: int, payload: CloudProviderAccountCreate) -> CloudProviderAccountRead:
         return CloudProviderAccountRead.model_validate(self.service.create(user_id, payload))
@@ -60,6 +68,16 @@ class CloudProviderAccountController:
         # must never fail the validate-credentials response itself.
         try:
             self.region_sync_service.sync_account(account_id, current_user_id)
+        except Exception:
+            pass
+        # Phase 29: same best-effort, never-fail-the-response shape as the
+        # region sync immediately above - kicks off real AWS resource
+        # discovery (EC2/ECS/EKS/Lambda/RDS/S3/EBS/ELB/ASG/VPC/Subnets/
+        # SecurityGroups/CloudWatch Alarms) right away, so the Dashboard
+        # populates without the user needing to wait for the next scheduled
+        # sweep or take any further action.
+        try:
+            self.discovery_service.discover_account(account_id, current_user_id)
         except Exception:
             pass
         return ConnectionTestResultRead(**result)
@@ -149,6 +167,39 @@ class CloudProviderAccountController:
     ) -> CloudResourceListRead:
         items = self.resource_inventory_service.list_resources(account_id, current_user_id, category, region)
         return CloudResourceListRead(category=category, region=region, items=list(items))
+
+    def list_discovered_resources(
+        self, account_id: int, current_user_id: int, resource_type: str | None, active_only: bool
+    ) -> DiscoveredResourceListRead:
+        pairs = self.discovery_service.list_resources(account_id, current_user_id, resource_type, active_only)
+        return DiscoveredResourceListRead(
+            items=[
+                DiscoveredResourceRead(
+                    id=resource.id,
+                    resource_type=resource.resource_type,
+                    external_id=resource.external_id,
+                    name=resource.name,
+                    region=resource.region,
+                    availability_zone=resource.availability_zone,
+                    status=resource.status,
+                    instance_type=resource.instance_type,
+                    public_ip=resource.public_ip,
+                    private_ip=resource.private_ip,
+                    is_active=resource.is_active,
+                    first_seen_at=resource.first_seen_at,
+                    last_seen_at=resource.last_seen_at,
+                    latest_metric=Ec2MetricRead.model_validate(metric) if metric else None,
+                )
+                for resource, metric in pairs
+            ]
+        )
+
+    def get_discovery_summary(self, account_id: int, current_user_id: int) -> CloudAccountDiscoverySummary:
+        return CloudAccountDiscoverySummary(**self.discovery_service.get_summary(account_id, current_user_id))
+
+    def discover_resources(self, account_id: int, current_user_id: int) -> CloudAccountDiscoverySummary:
+        self.discovery_service.discover_account(account_id, current_user_id)
+        return self.get_discovery_summary(account_id, current_user_id)
 
     def deploy_resource(
         self, account_id: int, current_user_id: int, resource_type: str, region: str, spec: dict

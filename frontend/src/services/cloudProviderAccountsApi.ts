@@ -4,6 +4,7 @@ import type {
   CloudAccountAlertThreshold,
   CloudAccountAlertThresholdUpdate,
   CloudAccountDeploymentSummary,
+  CloudAccountDiscoverySummary,
   CloudAccountRegions,
   CloudAccountTimezone,
   CloudAccountTimezoneCreate,
@@ -16,6 +17,7 @@ import type {
   ConnectionTestResult,
   DeployResourceRequest,
   DestroyResourceRequest,
+  DiscoveredResourceList,
   PaginatedResponse,
   ResourceCategory,
   TestConnectionRequest,
@@ -137,4 +139,22 @@ export const cloudProviderAccountsApi = {
         data: payload,
       })
       .then(() => undefined),
+
+  // --- Automatic AWS resource discovery (Phase 29) ---
+  listDiscoveredResources: (accountId: number, resourceType?: string, activeOnly = true) =>
+    httpClient
+      .get<DiscoveredResourceList>(`/cloud-provider-accounts/${accountId}/discovered-resources`, {
+        params: { resource_type: resourceType || undefined, active_only: activeOnly },
+      })
+      .then((r) => r.data),
+
+  getDiscoverySummary: (accountId: number) =>
+    httpClient
+      .get<CloudAccountDiscoverySummary>(`/cloud-provider-accounts/${accountId}/discovered-resources/summary`)
+      .then((r) => r.data),
+
+  discoverResources: (accountId: number) =>
+    httpClient
+      .post<CloudAccountDiscoverySummary>(`/cloud-provider-accounts/${accountId}/discover-resources`)
+      .then((r) => r.data),
 };

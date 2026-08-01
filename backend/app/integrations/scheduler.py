@@ -7,6 +7,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.config.settings import get_settings
 from app.database.session import SessionLocal
 from app.services.cloud_region_sync_service import CloudRegionSyncService
+from app.services.cloud_resource_discovery_service import CloudResourceDiscoveryService
 from app.services.cloud_sync_service import CloudSyncService
 from app.utils.logger import get_logger
 
@@ -68,4 +69,38 @@ def register_cloud_region_sync_job(scheduler: BackgroundScheduler) -> None:
     logger.info(
         "Cloud region sync job registered (every %s hours)",
         settings.CLOUD_REGION_SYNC_INTERVAL_HOURS,
+    )
+
+
+def _run_resource_discovery_all() -> None:
+    db = SessionLocal()
+    try:
+        summary = CloudResourceDiscoveryService(db).discover_all()
+        logger.info("Scheduled cloud resource discovery: %s", summary)
+    except Exception:
+        logger.exception("Scheduled cloud resource discovery failed")
+    finally:
+        db.close()
+
+
+def register_cloud_resource_discovery_job(scheduler: BackgroundScheduler) -> None:
+    """Phase 29: periodically re-discovers every connected account's real
+    resources (EC2/ECS/EKS/Lambda/RDS/S3/EBS/ELB/ASG/VPC/Subnets/
+    SecurityGroups/CloudWatch Alarms) and refreshes CloudWatch metrics for
+    every active, running EC2 instance - the mechanism that makes a newly
+    created or terminated EC2 instance appear/disappear on the platform
+    automatically, without the user ever needing to reconnect their
+    account."""
+    settings = get_settings()
+    scheduler.add_job(
+        _run_resource_discovery_all,
+        "interval",
+        seconds=settings.CLOUD_RESOURCE_DISCOVERY_INTERVAL_SECONDS,
+        id="cloud_resource_discovery",
+        max_instances=1,
+        coalesce=True,
+    )
+    logger.info(
+        "Cloud resource discovery job registered (every %s seconds)",
+        settings.CLOUD_RESOURCE_DISCOVERY_INTERVAL_SECONDS,
     )

@@ -12,7 +12,7 @@ import boto3
 import botocore.exceptions
 from moto import mock_aws
 
-from app.integrations.aws_cloudwatch import fetch_ec2_resource_usage
+from app.integrations.aws_cloudwatch import fetch_ec2_full_metrics, fetch_ec2_resource_usage
 from app.utils.exceptions import ValidationAppError
 
 FAKE_CREDENTIALS = {"access_key_id": "testing", "secret_access_key": "testing"}
@@ -160,3 +160,94 @@ def test_fetch_ec2_resource_usage_does_not_retry_non_transient_client_error():
             fetch_ec2_resource_usage(FAKE_CREDENTIALS, "us-east-1", "i-fake123", lookback_minutes=15)
 
     assert mock_client_factory.return_value.get_metric_data.call_count == 1
+
+
+# --- Phase 29: fetch_ec2_full_metrics (disk/status-check/best-effort memory) -
+
+
+def _seed_full_datapoints(
+    instance_id: str, cpu: float, network_in: float, network_out: float,
+    disk_read: float, disk_write: float, status_check: float,
+) -> None:
+    client = boto3.client(
+        "cloudwatch", region_name="us-east-1", aws_access_key_id="testing", aws_secret_access_key="testing"
+    )
+    now = datetime.now(timezone.utc)
+    client.put_metric_data(
+        Namespace="AWS/EC2",
+        MetricData=[
+            {"MetricName": "CPUUtilization", "Dimensions": [{"Name": "InstanceId", "Value": instance_id}], "Timestamp": now, "Value": cpu, "Unit": "Percent"},
+            {"MetricName": "NetworkIn", "Dimensions": [{"Name": "InstanceId", "Value": instance_id}], "Timestamp": now, "Value": network_in, "Unit": "Bytes"},
+            {"MetricName": "NetworkOut", "Dimensions": [{"Name": "InstanceId", "Value": instance_id}], "Timestamp": now, "Value": network_out, "Unit": "Bytes"},
+            {"MetricName": "DiskReadBytes", "Dimensions": [{"Name": "InstanceId", "Value": instance_id}], "Timestamp": now, "Value": disk_read, "Unit": "Bytes"},
+            {"MetricName": "DiskWriteBytes", "Dimensions": [{"Name": "InstanceId", "Value": instance_id}], "Timestamp": now, "Value": disk_write, "Unit": "Bytes"},
+            {"MetricName": "StatusCheckFailed", "Dimensions": [{"Name": "InstanceId", "Value": instance_id}], "Timestamp": now, "Value": status_check, "Unit": "Count"},
+        ],
+    )
+
+
+@mock_aws
+def test_fetch_ec2_full_metrics_parses_disk_and_status_check():
+    _seed_full_datapoints(
+        "i-full123", cpu=33.0, network_in=1000.0, network_out=2000.0,
+        disk_read=4096.0, disk_write=8192.0, status_check=0.0,
+    )
+
+    result = fetch_ec2_full_metrics(FAKE_CREDENTIALS, "us-east-1", "i-full123", "t2.micro", lookback_minutes=15)
+
+    assert result["cpu_usage_percent"] == pytest.approx(33.0)
+    assert result["disk_read_bytes"] == pytest.approx(4096.0)
+    assert result["disk_write_bytes"] == pytest.approx(8192.0)
+    assert result["status_check_failed"] == 0
+    assert result["memory_usage_mb"] is None  # no CWAgent data seeded - honestly disclosed, not fabricated
+    assert isinstance(result["recorded_at"], datetime)
+
+
+@mock_aws
+def test_fetch_ec2_full_metrics_computes_memory_from_real_cwagent_percent_and_instance_memory():
+    _seed_full_datapoints(
+        "i-mem123", cpu=10.0, network_in=0.0, network_out=0.0, disk_read=0.0, disk_write=0.0, status_check=0.0
+    )
+    cloudwatch = boto3.client(
+        "cloudwatch", region_name="us-east-1", aws_access_key_id="testing", aws_secret_access_key="testing"
+    )
+    now = datetime.now(timezone.utc)
+    cloudwatch.put_metric_data(
+        Namespace="CWAgent",
+        MetricData=[
+            {
+                "MetricName": "mem_used_percent",
+                "Dimensions": [{"Name": "InstanceId", "Value": "i-mem123"}],
+                "Timestamp": now,
+                "Value": 50.0,
+                "Unit": "Percent",
+            }
+        ],
+    )
+    ec2 = boto3.client(
+        "ec2", region_name="us-east-1", aws_access_key_id="testing", aws_secret_access_key="testing"
+    )
+    expected_memory_mib = ec2.describe_instance_types(InstanceTypes=["t2.micro"])["InstanceTypes"][0][
+        "MemoryInfo"
+    ]["SizeInMiB"]
+
+    result = fetch_ec2_full_metrics(FAKE_CREDENTIALS, "us-east-1", "i-mem123", "t2.micro", lookback_minutes=15)
+
+    # A real, derived value (percent x real instance memory), never a
+    # fabricated absolute figure - see _fetch_cwagent_memory_mb's docstring.
+    assert result["memory_usage_mb"] == pytest.approx(expected_memory_mib * 0.5)
+
+
+@mock_aws
+def test_fetch_ec2_full_metrics_raises_when_no_datapoints():
+    with pytest.raises(ValidationAppError) as exc_info:
+        fetch_ec2_full_metrics(
+            FAKE_CREDENTIALS, "us-east-1", "i-does-not-exist", "t2.micro", lookback_minutes=15
+        )
+    assert exc_info.value.code == "NO_CLOUDWATCH_DATA"
+
+
+def test_fetch_ec2_full_metrics_requires_access_key_and_secret():
+    with pytest.raises(ValidationAppError) as exc_info:
+        fetch_ec2_full_metrics({}, "us-east-1", "i-fake123", "t2.micro", lookback_minutes=15)
+    assert exc_info.value.code == "AWS_CREDENTIALS_INCOMPLETE"

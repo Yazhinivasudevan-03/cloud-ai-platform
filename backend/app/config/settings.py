@@ -238,6 +238,16 @@ class Settings(BaseSettings):
     CLOUD_REGION_SYNC_INTERVAL_HOURS: int = 24
     CLOUD_REGION_CACHE_TTL_HOURS: int = 24
 
+    # Automatic AWS resource discovery (Phase 29) - how often the
+    # background job re-discovers every connected account's real resources
+    # (EC2/ECS/EKS/Lambda/RDS/S3/EBS/ELB/ASG/VPC/Subnets/SecurityGroups/
+    # CloudWatch Alarms) and refreshes CloudWatch metrics for every active,
+    # running EC2 instance - deliberately much faster than
+    # CLOUD_REGION_SYNC_INTERVAL_HOURS since this is what makes the
+    # Dashboard feel "live" (a new/terminated instance should appear/
+    # disappear without the user ever reconnecting their account).
+    CLOUD_RESOURCE_DISCOVERY_INTERVAL_SECONDS: int = 60
+
     # Structured logging + distributed tracing (Phase 19). Logs are always
     # emitted as one JSON object per line (see app/utils/logger.py) - there
     # is no plain-text fallback, since the point is machine-parseable

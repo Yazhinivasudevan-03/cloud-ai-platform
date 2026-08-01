@@ -40,6 +40,7 @@ from app.schemas.cloud_resource import (
     DeployResourceRequest,
     DestroyResourceRequest,
 )
+from app.schemas.cloud_resource_discovery import CloudAccountDiscoverySummary, DiscoveredResourceListRead
 from app.schemas.common import ErrorResponse, PaginatedResponse
 
 router = APIRouter(prefix="/cloud-provider-accounts", tags=["Cloud Provider Accounts"])
@@ -426,6 +427,73 @@ def list_cloud_provider_account_resources(
     current_user: User = Depends(get_current_active_user),
 ) -> CloudResourceListRead:
     return CloudProviderAccountController(db).list_inventory(account_id, current_user.id, category, region)
+
+
+@router.get(
+    "/{account_id}/discovered-resources",
+    response_model=DiscoveredResourceListRead,
+    summary=(
+        "List real AWS resources automatically discovered and persisted for one of the current "
+        "user's own cloud provider accounts (Phase 29) - reads only from this platform's own "
+        "database (no live provider call), which is what keeps the Dashboard fast"
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+    },
+)
+def list_discovered_resources(
+    account_id: int,
+    resource_type: str | None = Query(default=None, description="e.g. ec2_instance, s3_bucket, vpc"),
+    active_only: bool = Query(default=True, description="Exclude resources no longer observed (terminated/deleted)"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> DiscoveredResourceListRead:
+    return CloudProviderAccountController(db).list_discovered_resources(
+        account_id, current_user.id, resource_type, active_only
+    )
+
+
+@router.get(
+    "/{account_id}/discovered-resources/summary",
+    response_model=CloudAccountDiscoverySummary,
+    summary=(
+        "Dashboard-ready aggregate (EC2 running/stopped counts, per-resource-type counts, last "
+        "discovery status) for one of the current user's own cloud provider accounts (Phase 29)"
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+    },
+)
+def get_discovered_resources_summary(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CloudAccountDiscoverySummary:
+    return CloudProviderAccountController(db).get_discovery_summary(account_id, current_user.id)
+
+
+@router.post(
+    "/{account_id}/discover-resources",
+    response_model=CloudAccountDiscoverySummary,
+    summary=(
+        "Force an immediate real AWS resource discovery run for one of the current user's own "
+        "cloud provider accounts (Phase 29) - same idea as 'Refresh Regions'. On a genuine "
+        "provider-side failure, the real error is returned rather than a silent empty result"
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not this user's account"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+        422: {"model": ErrorResponse, "description": "Discovery failed (bad credentials, provider outage, etc.)"},
+    },
+)
+def discover_resources(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CloudAccountDiscoverySummary:
+    return CloudProviderAccountController(db).discover_resources(account_id, current_user.id)
 
 
 @router.post(

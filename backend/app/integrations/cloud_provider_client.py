@@ -138,6 +138,45 @@ class CloudProviderClient(ABC):
     def list_networking(self, region: str) -> list[CloudResourceSummary]:
         raise self._not_yet_supported("Networking inventory")
 
+    # --- Phase 29: broader automatic-discovery inventory categories ---
+    # Same "raises _not_yet_supported by default" shape as the 5 methods
+    # above (Phase 25C) - a provider that hasn't implemented one of these
+    # yet honestly discloses that rather than returning a fabricated empty
+    # list. AWS implements all 8 for real (see
+    # app/integrations/providers/aws_provider.py); every other provider is
+    # unaffected by adding these.
+    def list_ecs_clusters(self, region: str) -> list[CloudResourceSummary]:
+        raise self._not_yet_supported("ECS cluster inventory")
+
+    def list_serverless_functions(self, region: str) -> list[CloudResourceSummary]:
+        raise self._not_yet_supported("Serverless function inventory")
+
+    def list_volumes(self, region: str) -> list[CloudResourceSummary]:
+        raise self._not_yet_supported("Volume inventory")
+
+    def list_load_balancers(self, region: str) -> list[CloudResourceSummary]:
+        raise self._not_yet_supported("Load balancer inventory")
+
+    def list_scaling_groups(self, region: str) -> list[CloudResourceSummary]:
+        raise self._not_yet_supported("Scaling group inventory")
+
+    def list_subnets(self, region: str) -> list[CloudResourceSummary]:
+        raise self._not_yet_supported("Subnet inventory")
+
+    def list_security_groups(self, region: str) -> list[CloudResourceSummary]:
+        raise self._not_yet_supported("Security group inventory")
+
+    def list_alarms(self, region: str) -> list[CloudResourceSummary]:
+        raise self._not_yet_supported("Alarm inventory")
+
+    def list_ec2_instances_detailed(self, region: str) -> list[dict]:
+        """Richer EC2 instance detail for the automatic-discovery/dashboard
+        pipeline (availability_zone, public_ip, private_ip, tags) - a
+        superset of what list_resources()'s normalized CloudResourceSummary
+        carries. Only meaningful for compute-instance-shaped providers;
+        default disclosure matches every other optional method here."""
+        raise self._not_yet_supported("Detailed instance inventory")
+
     def list_monitoring(self, resource_id: str, lookback_minutes: int) -> ResourceUsageSnapshot:
         raise self._not_yet_supported("Monitoring")
 

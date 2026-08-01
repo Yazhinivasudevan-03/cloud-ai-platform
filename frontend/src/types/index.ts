@@ -494,6 +494,52 @@ export interface DestroyResourceRequest {
   confirm: string;
 }
 
+// --- Automatic AWS resource discovery (Phase 29) -------------------------
+// Persisted, auto-refreshing counterpart to the on-demand CloudResource
+// browse endpoint above - distinct type names so the two never get
+// confused despite the overlapping domain.
+
+export interface Ec2Metric {
+  cpu_usage_percent: number;
+  memory_usage_mb: number | null;
+  network_in_kbps: number;
+  network_out_kbps: number;
+  disk_read_bytes: number;
+  disk_write_bytes: number;
+  status_check_failed: number | null;
+  recorded_at: string;
+}
+
+export interface DiscoveredResource {
+  id: number;
+  resource_type: string;
+  external_id: string;
+  name: string;
+  region: string;
+  availability_zone: string | null;
+  status: string;
+  instance_type: string | null;
+  public_ip: string | null;
+  private_ip: string | null;
+  is_active: boolean;
+  first_seen_at: string;
+  last_seen_at: string;
+  latest_metric: Ec2Metric | null;
+}
+
+export interface DiscoveredResourceList {
+  items: DiscoveredResource[];
+}
+
+export interface CloudAccountDiscoverySummary {
+  total_instances: number;
+  running_instances: number;
+  stopped_instances: number;
+  resource_counts_by_type: Record<string, number>;
+  last_discovery_at: string | null;
+  last_discovery_error: string | null;
+}
+
 // --- Notification settings (Phase 20) ----------------------------------
 
 // The 5 tiered categories support per-tier (60/80/90%) checkboxes; the

@@ -73,6 +73,16 @@ class CloudProviderAccount(TimestampMixin, Base):
     credentials_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     credentials_validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # --- Phase 29: automatic resource discovery ---
+    # Reflects the outcome of the most recent CloudResourceDiscoveryService
+    # run for this account (on-connect best-effort call, the scheduled
+    # sweep, or a manual "Discover Now"). last_discovery_error is the
+    # provider's own real error message, verbatim - never a generic "0
+    # resources found" when discovery actually failed (see
+    # CloudResourceDiscoveryService.discover_account).
+    last_discovery_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_discovery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     user: Mapped["User"] = relationship("User", back_populates="cloud_provider_accounts")
     alert_threshold: Mapped["CloudAccountAlertThreshold | None"] = relationship(
         "CloudAccountAlertThreshold",

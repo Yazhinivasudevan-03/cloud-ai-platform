@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { AlertTimeCell } from "@/components/AlertTimeCell";
 import { CloudAccountAlertThresholdsCard } from "@/components/CloudAccountAlertThresholdsCard";
 import { CloudAccountFormDialog } from "@/components/CloudAccountFormDialog";
+import { CloudAccountDiscoveredResourcesCard } from "@/components/CloudAccountDiscoveredResourcesCard";
 import { CloudAccountRegionsCard } from "@/components/CloudAccountRegionsCard";
 import { CloudAccountResourcesCard } from "@/components/CloudAccountResourcesCard";
 import { CloudAccountTimezonesCard } from "@/components/CloudAccountTimezonesCard";
@@ -158,6 +159,12 @@ export function CloudAccountDetailPage() {
       <Box sx={{ mb: 3 }}>
         <CloudAccountResourcesCard accountId={id} />
       </Box>
+
+      {accountQuery.data?.provider === "aws" && (
+        <Box sx={{ mb: 3 }}>
+          <CloudAccountDiscoveredResourcesCard accountId={id} />
+        </Box>
+      )}
 
       <Box sx={{ mb: 3 }}>
         <CloudAccountTimezonesCard accountId={id} provider={accountQuery.data?.provider ?? ""} />
