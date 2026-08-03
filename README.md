@@ -6,7 +6,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 
 ## Project status
 
-**All 31 phases complete.** Built phase by phase - see [`docs/`](docs/) for a detailed, honestly-verified report for each phase.
+**All 32 phases complete.** Built phase by phase - see [`docs/`](docs/) for a detailed, honestly-verified report for each phase.
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -41,6 +41,7 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 | 29 | Automatic AWS resource discovery: closed the gap between "AWS account connected" and "the platform actually knows what's in it" - persisted `CloudResource`/`CloudResourceMetric` tables, 13 real inventory categories (EC2/ECS/EKS/Lambda/RDS/S3/EBS/ELB/ASG/VPC/Subnets/SecurityGroups/CloudWatch Alarms), automatic discovery on connect + a fast (default 60s) scheduled sweep, real CloudWatch metrics (CPU/network/disk/status-check/best-effort memory) for every running EC2 instance, and a live Dashboard/Cloud-Account-detail view - all additive, the existing Project/Deployment pipeline and Phase 25C browse endpoint untouched | **Complete** - see [`docs/PHASE_29.md`](docs/PHASE_29.md) |
 | 30 | Full global region support for all 7 providers: a new central `region_metadata.py` table (185 regions - AWS 32, Azure 37, GCP 40, OCI 32, IBM 10, DigitalOcean 12, Alibaba 22) enriches every already-live-discovered region with a real city/country/IANA timezone, replacing 4 old scattered display-name dicts; automatic region→timezone mapping (`selected_region_timezone`, no manual setup required); the post-connect region switcher is now a searchable/scrollable Autocomplete showing "code — City, Country"; confirmed "All Regions" mode already worked end to end for discovery/monitoring/alerts - live-verified against a real, already-connected AWS account across all 17 of its enabled regions | **Complete** - see [`docs/PHASE_30.md`](docs/PHASE_30.md) |
 | 31 | Twilio SMS SDK integration (real `twilio.rest.Client`, real detailed error handling, replacing raw HTTP) + Notification History enrichment: 4 new columns (`cloud_provider_account_id`, `phone_number`, `message_sid`, `delivery_status`) so every SMS attempt - success or failure - is auditable; dynamic per-user phone numbers, E.164 validation, and per-tenant alert isolation confirmed already correct from earlier phases; live-verified against a real Twilio account (real auth, a genuine Trial-account delivery rejection captured end to end with full error detail, Notification History row proven to persist correctly) | **Complete** - see [`docs/PHASE_31.md`](docs/PHASE_31.md) |
+| 32 | Chromium browser extension (Manifest V3, Chrome/Edge/Brave/Opera) as a second, independent client alongside the unmodified web app - popup dashboard, background-service-worker polling via `chrome.alarms`, badge (red/critical, yellow/warning), and browser notifications on new alerts, all built entirely on the existing REST API and JWT auth, no new backend endpoints; a real pre-existing backend bug (a required-but-actually-optional response field crashing the per-account deployments endpoint) was found and fixed along the way; live-verified in a real Chromium instance via Playwright against the real backend with a genuine breaching-CPU alert produced by the platform's own alert evaluator | **Complete** - see [`docs/PHASE_32.md`](docs/PHASE_32.md), [`docs/EXTENSION_INSTALL.md`](docs/EXTENSION_INSTALL.md) |
 
 ## Known limitations (honestly disclosed, not glossed over)
 
@@ -102,6 +103,7 @@ these, including what *was* verified and how.
 cloud-ai-platform/
   backend/         FastAPI REST API (Clean Architecture, Repository Pattern)
   frontend/        React + TypeScript + MUI dashboard (Vite, dockerized via nginx)
+  browser-extension/  Manifest V3 browser extension (Chrome/Edge/Brave/Opera) - see docs/PHASE_32.md, docs/EXTENSION_INSTALL.md
   ml-models/       LSTM / Isolation Forest / Random Forest models - independent batch pipeline (own Docker image, run via `docker compose --profile ml run`)
   database/        Schema init scripts, seed data, backups
   docker/          Shared Docker assets

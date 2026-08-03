@@ -101,7 +101,11 @@ class CloudAccountDeploymentSummary(BaseModel):
     deployment_id: int
     deployment_name: str
     namespace: str
-    cloud_resource_identifier: str
+    # Genuinely optional - DeploymentCreate.cloud_resource_identifier is
+    # `str | None` (a deployment can exist before it's linked to a synced
+    # cloud resource), so this was previously declared as a required `str`
+    # and crashed this endpoint with a 500 for any such deployment.
+    cloud_resource_identifier: str | None = None
     latest_usage: ResourceUsageRead | None = Field(
         default=None,
         description="Most recent resource usage snapshot for this deployment, or null if it has never been synced/recorded yet",
