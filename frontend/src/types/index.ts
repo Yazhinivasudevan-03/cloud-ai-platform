@@ -327,6 +327,11 @@ export interface Notification {
   resource: string | null;
   alert_time_utc: string | null;
   alert_time_local: string | null;
+  // SMS delivery tracking - populated only for channel="sms" rows.
+  cloud_provider_account_id: number | null;
+  phone_number: string | null;
+  message_sid: string | null;
+  delivery_status: string | null;
 }
 
 export interface NotificationSummary {

@@ -11,6 +11,8 @@ import smtplib
 from unittest.mock import MagicMock, patch
 
 import httpx
+import requests
+from twilio.base.exceptions import TwilioRestException
 
 from app.config.settings import get_settings
 from app.notifications.email_notifier import send_email, send_email_with_reason
@@ -166,7 +168,7 @@ def test_send_sms_returns_false_when_unconfigured(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "")
-    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "")
 
     result = send_sms("+14155552671", "hello")
 
@@ -177,33 +179,31 @@ def test_send_sms_returns_false_when_user_has_no_phone_number(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
-    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
 
-    with patch("app.notifications.sms_notifier.httpx.post") as mock_post:
+    with patch("app.notifications.sms_notifier.Client") as mock_client_cls:
         result = send_sms(None, "hello")
 
     assert result is False
-    mock_post.assert_not_called()
+    mock_client_cls.return_value.messages.create.assert_not_called()
 
 
-def test_send_sms_calls_twilio_api_when_configured(monkeypatch):
+def test_send_sms_calls_twilio_sdk_when_configured(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
-    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
 
-    mock_response = MagicMock()
-    mock_response.raise_for_status.return_value = None
+    mock_message = MagicMock(sid="SMxxxx", status="queued", error_code=None, error_message=None)
 
-    with patch("app.notifications.sms_notifier.httpx.post", return_value=mock_response) as mock_post:
+    with patch("app.notifications.sms_notifier.Client") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.return_value = mock_message
         result = send_sms("+14155552671", "hello from the alert engine")
 
     assert result is True
-    mock_post.assert_called_once_with(
-        "https://api.twilio.com/2010-04-01/Accounts/ACxxxx/Messages.json",
-        auth=("ACxxxx", "secret"),
-        data={"From": "+15005550006", "To": "+14155552671", "Body": "hello from the alert engine"},
-        timeout=10,
+    mock_client_cls.assert_called_once_with("ACxxxx", "secret")
+    mock_client_cls.return_value.messages.create.assert_called_once_with(
+        to="+14155552671", from_="+15005550006", body="hello from the alert engine"
     )
 
 
@@ -211,35 +211,35 @@ def test_send_sms_retries_on_transient_error_then_succeeds(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
-    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
 
-    mock_response = MagicMock()
-    mock_response.raise_for_status.return_value = None
+    mock_message = MagicMock(sid="SMxxxx", status="queued", error_code=None, error_message=None)
 
-    with patch(
-        "app.notifications.sms_notifier.httpx.post",
-        side_effect=[httpx.ConnectError("connection refused"), mock_response],
-    ) as mock_post:
+    with patch("app.notifications.sms_notifier.Client") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.side_effect = [
+            requests.exceptions.ConnectionError("connection refused"),
+            mock_message,
+        ]
         result = send_sms("+14155552671", "hello")
 
     assert result is True
-    assert mock_post.call_count == 2
+    assert mock_client_cls.return_value.messages.create.call_count == 2
 
 
 def test_send_sms_returns_false_after_retries_exhausted(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
-    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
 
-    with patch(
-        "app.notifications.sms_notifier.httpx.post",
-        side_effect=httpx.ConnectError("connection refused"),
-    ) as mock_post:
+    with patch("app.notifications.sms_notifier.Client") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.side_effect = requests.exceptions.ConnectionError(
+            "connection refused"
+        )
         result = send_sms("+14155552671", "hello")
 
     assert result is False
-    assert mock_post.call_count == 3
+    assert mock_client_cls.return_value.messages.create.call_count == 3
 
 
 def test_send_sms_does_not_retry_bad_credentials(monkeypatch):
@@ -248,19 +248,44 @@ def test_send_sms_does_not_retry_bad_credentials(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "wrong-token")
-    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
 
-    mock_response = MagicMock()
-    mock_response.status_code = 401
-    mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-        "Unauthorized", request=MagicMock(), response=mock_response
-    )
-
-    with patch("app.notifications.sms_notifier.httpx.post", return_value=mock_response) as mock_post:
+    with patch("app.notifications.sms_notifier.Client") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.side_effect = TwilioRestException(
+            401, "/Accounts/ACxxxx/Messages.json", msg="Authenticate", code=20003
+        )
         result = send_sms("+14155552671", "hello")
 
     assert result is False
-    assert mock_post.call_count == 1
+    assert mock_client_cls.return_value.messages.create.call_count == 1
+
+
+def test_send_sms_returns_detailed_error_for_an_unrecognized_twilio_failure(monkeypatch):
+    """Requirement: a delivery failure returns the real Twilio error code
+    and message, not a generic bucket - proven against the exact real
+    error this integration hit during live verification (a trial account
+    with no assigned sending number / unverified recipient)."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
+
+    with patch("app.notifications.sms_notifier.Client") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.side_effect = TwilioRestException(
+            422,
+            "/Accounts/ACxxxx/Messages.json",
+            msg="Unable to create record: No Twilio trial phone number is assigned for messaging "
+            "to this destination number. Please add the 'to' number as a verified recipient.",
+            code=572002,
+        )
+        sent, reason = send_sms_with_reason("+14155552671", "hello")
+
+    assert sent is False
+    assert reason == (
+        "failed: Twilio error 572002 - Unable to create record: No Twilio trial phone number is "
+        "assigned for messaging to this destination number. Please add the 'to' number as a "
+        "verified recipient."
+    )
 
 
 def test_send_teams_message_returns_false_when_no_webhook_given():
@@ -452,7 +477,7 @@ def test_send_sms_with_reason_not_configured(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "")
-    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "")
 
     sent, reason = send_sms_with_reason("+14155552671", "hello")
 
@@ -464,7 +489,7 @@ def test_send_sms_with_reason_no_recipient(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
-    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
 
     sent, reason = send_sms_with_reason(None, "hello")
 
@@ -476,34 +501,48 @@ def test_send_sms_with_reason_auth_failed(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "wrong-token")
-    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
 
-    mock_response = MagicMock()
-    mock_response.status_code = 401
-    mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-        "Unauthorized", request=MagicMock(), response=mock_response
-    )
-
-    with patch("app.notifications.sms_notifier.httpx.post", return_value=mock_response):
+    with patch("app.notifications.sms_notifier.Client") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.side_effect = TwilioRestException(
+            401, "/Accounts/ACxxxx/Messages.json", msg="Authenticate", code=20003
+        )
         sent, reason = send_sms_with_reason("+14155552671", "hello")
 
     assert sent is False
     assert reason == "auth_failed"
 
 
+def test_send_sms_with_reason_invalid_recipient(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
+
+    with patch("app.notifications.sms_notifier.Client") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.side_effect = TwilioRestException(
+            400, "/Accounts/ACxxxx/Messages.json", msg="Invalid 'To' Phone Number", code=21211
+        )
+        sent, reason = send_sms_with_reason("not-a-number", "hello")
+
+    assert sent is False
+    assert reason == "invalid_recipient"
+
+
 def test_send_sms_with_reason_unreachable(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
-    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
 
-    with patch(
-        "app.notifications.sms_notifier.httpx.post", side_effect=httpx.ConnectError("connection refused")
-    ):
+    with patch("app.notifications.sms_notifier.Client") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.side_effect = requests.exceptions.ConnectionError(
+            "connection refused"
+        )
         sent, reason = send_sms_with_reason("+14155552671", "hello")
 
     assert sent is False
-    assert reason == "unreachable"
+    assert reason.startswith("unreachable")
 
 
 def test_send_slack_message_with_reason_not_configured(monkeypatch):

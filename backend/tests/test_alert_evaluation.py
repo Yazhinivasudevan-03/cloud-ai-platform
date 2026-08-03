@@ -129,7 +129,7 @@ def test_alert_notifies_admin_via_sms_when_twilio_configured_and_phone_number_se
     settings = get_settings()
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
-    monkeypatch.setattr(settings, "TWILIO_FROM_NUMBER", "+15005550006")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
     owner = demo_deployment.microservice.project.owner
     owner.phone_number = "+14155552671"
     db_session.add(NotificationSetting(user_id=owner.id, sms_enabled=True))
@@ -137,18 +137,160 @@ def test_alert_notifies_admin_via_sms_when_twilio_configured_and_phone_number_se
 
     _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=65.0)
 
-    mock_response = MagicMock()
-    mock_response.raise_for_status.return_value = None
-    with patch("app.notifications.sms_notifier.httpx.post", return_value=mock_response) as mock_post:
+    mock_message = MagicMock(sid="SMxxxx", status="queued", error_code=None, error_message=None)
+    with patch("app.notifications.sms_notifier.Client") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.return_value = mock_message
         AlertEvaluationService(db_session).evaluate_all()
 
-    mock_post.assert_called_once()
+    mock_client_cls.return_value.messages.create.assert_called_once()
     alert = db_session.query(Alert).filter(Alert.deployment_id == demo_deployment.id).one()
     channels = {
         n.channel
         for n in db_session.query(Notification).filter(Notification.alert_id == alert.id).all()
     }
     assert "sms" in channels
+
+
+def test_sms_notification_history_records_cloud_account_phone_sid_and_status(
+    db_session, demo_deployment, monkeypatch
+):
+    """Notification History (dynamic-phone-number follow-up): a real SMS
+    send must record which cloud account triggered it, the exact phone
+    number used, Twilio's real Message SID, and its real delivery status -
+    not just that an "sms" row exists."""
+    from unittest.mock import MagicMock, patch
+
+    from app.config.settings import get_settings
+    from app.models.notification_setting import NotificationSetting
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
+
+    owner = demo_deployment.microservice.project.owner
+    owner.phone_number = "+14155552671"
+    account = CloudProviderAccount(
+        user_id=owner.id, provider="aws", account_name="sms-history-account", region="us-east-1",
+        credentials_encrypted=encrypt_credentials({"access_key_id": "x", "secret_access_key": "y"}),
+        credentials_validated=True,
+    )
+    db_session.add(account)
+    db_session.flush()
+    demo_deployment.cloud_provider_account_id = account.id
+    db_session.add(NotificationSetting(user_id=owner.id, sms_enabled=True))
+    db_session.commit()
+
+    _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=65.0)
+
+    mock_message = MagicMock(sid="SM_real_sid_123", status="queued", error_code=None, error_message=None)
+    with patch("app.notifications.sms_notifier.Client") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.return_value = mock_message
+        AlertEvaluationService(db_session).evaluate_all()
+
+    alert = db_session.query(Alert).filter(Alert.deployment_id == demo_deployment.id).one()
+    sms_notification = (
+        db_session.query(Notification)
+        .filter(Notification.alert_id == alert.id, Notification.channel == "sms")
+        .one()
+    )
+    assert sms_notification.cloud_provider_account_id == account.id
+    assert sms_notification.phone_number == "+14155552671"
+    assert sms_notification.message_sid == "SM_real_sid_123"
+    assert sms_notification.delivery_status == "queued"
+
+
+def test_sms_notification_history_records_failed_delivery(db_session, demo_deployment, monkeypatch):
+    """A failed SMS delivery must still be logged to Notification History
+    with the real failure detail - a silently-dropped attempt would leave
+    the user with no way to discover their alert never actually arrived."""
+    from unittest.mock import patch
+
+    from app.config.settings import get_settings
+    from app.models.notification_setting import NotificationSetting
+    from twilio.base.exceptions import TwilioRestException
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
+
+    owner = demo_deployment.microservice.project.owner
+    owner.phone_number = "+14155552671"
+    db_session.add(NotificationSetting(user_id=owner.id, sms_enabled=True))
+    db_session.commit()
+
+    _add_resource_usage(db_session, demo_deployment.id, cpu_usage_percent=65.0)
+
+    with patch("app.notifications.sms_notifier.Client") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.side_effect = TwilioRestException(
+            422, "/Accounts/ACxxxx/Messages.json", msg="No Twilio trial phone number is assigned", code=572002
+        )
+        AlertEvaluationService(db_session).evaluate_all()
+
+    alert = db_session.query(Alert).filter(Alert.deployment_id == demo_deployment.id).one()
+    sms_notification = (
+        db_session.query(Notification)
+        .filter(Notification.alert_id == alert.id, Notification.channel == "sms")
+        .one()
+    )
+    assert sms_notification.message_sid is None
+    assert "572002" in sms_notification.delivery_status
+    assert sms_notification.phone_number == "+14155552671"
+
+
+def test_sms_alerts_are_isolated_per_cloud_account_owner(db_session, monkeypatch):
+    """Requirement 9: two different users, each owning their own cloud
+    account/deployment, must each receive SMS only for their own alerts -
+    never for the other user's."""
+    from unittest.mock import MagicMock, patch
+
+    from app.config.settings import get_settings
+    from app.models.notification_setting import NotificationSetting
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "ACxxxx")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "secret")
+    monkeypatch.setattr(settings, "TWILIO_PHONE_NUMBER", "+15005550006")
+
+    deployments = {}
+    for label, phone in (("alice", "+14155550001"), ("bob", "+14155550002")):
+        owner = User(
+            username=f"sms_isolation_{label}", email=f"{label}@example.com", full_name=label,
+            hashed_password="not-a-real-hash", is_active=True, is_superuser=False, phone_number=phone,
+        )
+        db_session.add(owner)
+        db_session.flush()
+        project = Project(name=f"{label}-project", owner_id=owner.id)
+        db_session.add(project)
+        db_session.flush()
+        microservice = Microservice(project_id=project.id, name=f"{label}-service")
+        db_session.add(microservice)
+        db_session.flush()
+        deployment = Deployment(microservice_id=microservice.id, name=f"{label}-deploy")
+        db_session.add(deployment)
+        db_session.add(NotificationSetting(user_id=owner.id, sms_enabled=True))
+        db_session.commit()
+        db_session.refresh(deployment)
+        deployments[label] = (owner, deployment)
+
+    # Only Alice's deployment breaches the CPU threshold.
+    _add_resource_usage(db_session, deployments["alice"][1].id, cpu_usage_percent=65.0)
+
+    mock_message = MagicMock(sid="SMxxxx", status="queued", error_code=None, error_message=None)
+    with patch("app.notifications.sms_notifier.Client") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.return_value = mock_message
+        AlertEvaluationService(db_session).evaluate_all()
+
+    mock_client_cls.return_value.messages.create.assert_called_once_with(
+        to="+14155550001", from_="+15005550006", body=mock_client_cls.return_value.messages.create.call_args.kwargs["body"]
+    )
+    bob_notifications = (
+        db_session.query(Notification)
+        .filter(Notification.user_id == deployments["bob"][0].id, Notification.channel == "sms")
+        .all()
+    )
+    assert bob_notifications == []
 
 
 # --- Memory alerting (Phase 20 - previously memory had no alert path at all) --

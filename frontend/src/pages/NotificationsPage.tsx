@@ -50,6 +50,20 @@ export function NotificationsPage() {
     { header: "Channel", render: (n) => n.channel },
     { header: "Message", render: (n) => <Typography variant="body2">{n.message}</Typography> },
     {
+      header: "SMS Delivery",
+      render: (n) =>
+        n.channel === "sms" ? (
+          <Stack spacing={0.25}>
+            <Typography variant="caption" color="text.secondary">
+              {n.phone_number ?? "-"}
+            </Typography>
+            <StatusChip value={n.delivery_status ?? "unknown"} />
+          </Stack>
+        ) : (
+          "-"
+        ),
+    },
+    {
       header: "",
       align: "right",
       render: (n) => (

@@ -43,7 +43,7 @@ from app.models.user import User
 from app.notifications.alert_preferences import load_preferences, wants_notification
 from app.notifications.email_notifier import send_email
 from app.notifications.slack_notifier import send_slack_message
-from app.notifications.sms_notifier import send_sms
+from app.notifications.sms_notifier import send_sms_with_details
 from app.notifications.teams_notifier import send_teams_message
 from app.notifications.telegram_notifier import send_telegram_message
 from app.repositories.notification_setting_repository import NotificationSettingRepository
@@ -173,11 +173,26 @@ def dispatch(db: Session, alert: Alert) -> int:
                 # tracked as its own Notification row/channel.
                 send_email(setting.secondary_email, subject, enriched_message)
 
-        if setting.sms_enabled and send_sms(user.phone_number, text):
+        if setting.sms_enabled:
+            # Always logged to Notification History (success or failure) -
+            # unlike the other channels below, a failed SMS delivery is a
+            # real, actionable event a user should be able to see, not a
+            # silently-dropped attempt. cloud_provider_account_id is only
+            # resolvable for a deployment-scoped alert (the only scope with
+            # a single associated cloud account - see _recipients() above);
+            # every other scope leaves it honestly null.
+            sms_result = send_sms_with_details(user.phone_number, text)
             db.add(
                 Notification(
                     user_id=user.id, alert_id=alert.id, channel="sms",
                     message=alert.message, is_read=False, sent_at=now,
+                    cloud_provider_account_id=(
+                        alert.deployment.cloud_provider_account_id
+                        if alert.deployment_id is not None else None
+                    ),
+                    phone_number=user.phone_number,
+                    message_sid=sms_result.message_sid,
+                    delivery_status=sms_result.status or sms_result.reason,
                 )
             )
             created += 1

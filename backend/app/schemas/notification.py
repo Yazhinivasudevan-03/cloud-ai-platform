@@ -25,6 +25,12 @@ class NotificationRead(BaseModel):
     resource: str | None = None
     alert_time_utc: datetime | None = None
     alert_time_local: str | None = None
+    # SMS delivery tracking - populated only for channel="sms" rows, null
+    # for every other channel (never fabricated).
+    cloud_provider_account_id: int | None = None
+    phone_number: str | None = None
+    message_sid: str | None = None
+    delivery_status: str | None = None
 
 
 class NotificationSummary(BaseModel):

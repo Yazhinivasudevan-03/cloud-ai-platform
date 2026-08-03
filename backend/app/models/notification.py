@@ -27,8 +27,31 @@ class Notification(TimestampMixin, Base):
     is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # --- SMS delivery tracking (dynamic per-user phone numbers follow-up) ---
+    # Populated only for channel="sms" rows - every other channel leaves
+    # these honestly null rather than fabricating a value. Only a
+    # deployment-scoped alert has a single associated cloud account
+    # (see dispatcher.py's _recipients()); project/user/platform-wide
+    # alerts leave cloud_provider_account_id null, never guessed.
+    cloud_provider_account_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("cloud_provider_accounts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # A snapshot of the recipient's User.phone_number at send time, not a
+    # live join - preserves what number an alert was actually sent to even
+    # if the user later changes it.
+    phone_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Twilio's real Message SID on a successful send.
+    message_sid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The real Twilio message status at send time ("queued", etc.) on
+    # success, or the real failure reason/error detail on failure - never
+    # a fabricated "delivered" (this platform has no delivery-status
+    # webhook, so true delivery confirmation isn't tracked, only send-time
+    # outcome).
+    delivery_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     user: Mapped["User"] = relationship("User", back_populates="notifications")
     alert: Mapped["Alert"] = relationship("Alert", back_populates="notifications")
+    cloud_provider_account: Mapped["CloudProviderAccount | None"] = relationship("CloudProviderAccount")
 
     # Phase 23: surfaces the same alert context the Notification Bell/history
     # need (severity, provider, region, resource, local+UTC alert time) by

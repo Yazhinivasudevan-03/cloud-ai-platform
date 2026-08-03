@@ -75,6 +75,11 @@ _SEED_ROLES = [
 
 @pytest.fixture(scope="session", autouse=True)
 def _create_test_schema():
+    # Drop first, not just at teardown: an interrupted previous run (e.g. a
+    # container killed mid-suite) skips the yield's drop_all below and
+    # leaves stale seed rows (duplicate-key errors on every test) - this
+    # makes a fresh session self-healing regardless of how the last one ended.
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     with TestSessionLocal() as session:
         for name, description in _SEED_ROLES:
