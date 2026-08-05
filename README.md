@@ -8,6 +8,25 @@ intelligent alerting, resource optimization, and cost monitoring for microservic
 
 **All 32 phases complete.** Built phase by phase - see [`docs/`](docs/) for a detailed, honestly-verified report for each phase.
 
+For a higher-level view, the 32 phases below are also grouped into 10 consolidated milestones in
+[`docs/ROADMAP.md`](docs/ROADMAP.md) (a documentation-only reorganization - no code, file, or completed
+functionality changed; see that document for the full old-phase-to-milestone mapping):
+
+| Milestone | Theme | Old Phases |
+|---|---|---|
+| 1 | Project Foundation & System Architecture | 1, 2 |
+| 2 | User Authentication & Multi-Tenant Management | 24 |
+| 3 | Multi-Cloud Integration | 11, 22, 25, 26, 27, 30 |
+| 4 | Resource Discovery & Real-Time Monitoring | 3, 12, 28, 29 |
+| 5 | Dashboard & User Interface | 7, 14, 15, 16, 32 |
+| 6 | AI Analytics & Resource Optimization | 4, 6 |
+| 7 | Alerts & Notification System | 5, 20, 21, 23, 31 |
+| 8 | Security & Cloud Operations | 13, 17, 18, 19 |
+| 9 | Testing, Validation & Cloud Deployment | 8, 9, 10 |
+| 10 | Final Optimization & Dissertation Readiness | *(no dedicated phase - see `docs/ROADMAP.md`)* |
+
+### Full phase-by-phase detail
+
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Project scaffolding, normalized MySQL schema (19 tables), JWT authentication + RBAC | **Complete** - see [`docs/PHASE_1.md`](docs/PHASE_1.md) |
